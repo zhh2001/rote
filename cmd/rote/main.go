@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/zhh2001/rote/internal/config"
+	"github.com/zhh2001/rote/internal/engine"
 	"github.com/zhh2001/rote/internal/store"
+	"github.com/zhh2001/rote/internal/tui"
 )
 
 const version = "0.0.1-dev"
@@ -23,9 +25,10 @@ func main() {
 
 // dispatch routes a subcommand and returns the process exit code.
 func dispatch(args []string, stdout, stderr io.Writer) int {
+	// No subcommand runs the all-in-one mode: schedule jobs and show the live
+	// dashboard at once.
 	if len(args) == 0 {
-		printUsage(stderr)
-		return 2
+		return runIntegrated(nil, stdout, stderr)
 	}
 
 	cmd, rest := args[0], args[1:]
@@ -44,11 +47,89 @@ func dispatch(args []string, stdout, stderr io.Writer) int {
 		return runList(rest, stdout, stderr)
 	case "logs":
 		return runLogs(rest, stdout, stderr)
+	case "tui":
+		return runTUI(rest, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "rote: unknown command %q\n\n", cmd)
 		printUsage(stderr)
 		return 2
 	}
+}
+
+// runTUI is the read-only dashboard: it loads config, opens the store, and shows
+// the live view without scheduling anything.
+func runTUI(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("tui", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var cfgFlag, dbFlag string
+	addConfigFlag(fs, &cfgFlag)
+	addDBFlag(fs, &dbFlag)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	jobs, st, code := loadConfigAndStore(cfgFlag, dbFlag, stderr)
+	if code != 0 {
+		return code
+	}
+	defer st.Close()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := tui.Run(ctx, jobs, st); err != nil {
+		fmt.Fprintf(stderr, "rote: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// runIntegrated schedules jobs (engine) while showing the live dashboard (TUI).
+// When the TUI exits for any reason, the engine's context is canceled and we
+// wait for it to finish before returning.
+//
+// TODO: add a lock to prevent a second scheduler (this mode or `rote start`)
+// from running against the same database and executing every job twice.
+func runIntegrated(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("rote", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var cfgFlag, dbFlag string
+	addConfigFlag(fs, &cfgFlag)
+	addDBFlag(fs, &dbFlag)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	jobs, st, code := loadConfigAndStore(cfgFlag, dbFlag, stderr)
+	if code != 0 {
+		return code
+	}
+	defer st.Close()
+
+	// Engine logs are discarded so they do not corrupt the alt-screen UI.
+	eng, err := engine.New(jobs, st, nil)
+	if err != nil {
+		fmt.Fprintf(stderr, "rote: %v\n", err)
+		return 1
+	}
+
+	engineCtx, cancelEngine := context.WithCancel(context.Background())
+	engineDone := make(chan error, 1)
+	go func() { engineDone <- eng.Run(engineCtx) }()
+
+	tuiCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	tuiErr := tui.Run(tuiCtx, jobs, st)
+
+	cancelEngine()
+	<-engineDone
+
+	if tuiErr != nil {
+		fmt.Fprintf(stderr, "rote: %v\n", tuiErr)
+		return 1
+	}
+	return 0
 }
 
 func runStart(args []string, stdout, stderr io.Writer) int {
@@ -234,16 +315,19 @@ func printUsage(w io.Writer) {
 	fmt.Fprint(w, `rote - a cron that remembers what it did
 
 Usage:
+  rote                 schedule jobs and show the live dashboard (all-in-one)
   rote <command> [flags] [args]
 
 Commands:
+  (no command)       run the scheduler and the dashboard together
+  tui                read-only dashboard for an already-running scheduler
   start              run the scheduler in the foreground until interrupted
   run <job>          run a single job once and record the result
   list               list jobs with their next and last run
   logs <job>         show recent runs for a job
   version            print the version
 
-Flags (start, run, list):
+Flags (rote, tui, start, run, list):
   -c, --config PATH  config file (default: <user-config-dir>/rote/jobs.toml)
       --db PATH      database file (default: <state-dir>/rote/rote.db)
 
@@ -251,5 +335,9 @@ logs flags:
       --db PATH      database file (as above)
   -n N               number of runs to show (default 20)
   -o, --output       also print the last run's stdout/stderr
+
+Note: do not run a scheduler twice against the same database. Running both
+'rote' and 'rote start' on the same db executes every job twice. To watch a
+running scheduler, use 'rote tui'.
 `)
 }
