@@ -1,0 +1,11 @@
+# Demo jobs for the dashboard recording: one healthy, one failing with stderr.
+
+[[job]]
+name = "heartbeat"
+schedule = "every 2s"
+command = "echo alive"
+
+[[job]]
+name = "disk-check"
+schedule = "every 2s"
+command = "ls /nonexistent-path"
