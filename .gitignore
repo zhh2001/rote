@@ -1,6 +1,10 @@
 /rote
 dist/
 *.db
+*.db-wal
+*.db-shm
 *.sqlite
+*.sqlite-wal
+*.sqlite-shm
 jobs.toml
 .DS_Store
