@@ -2,6 +2,10 @@
 
 **A cron that remembers what it did.**
 
+[![CI](https://github.com/zhh2001/rote/actions/workflows/ci.yml/badge.svg)](https://github.com/zhh2001/rote/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/zhh2001/rote/branch/main/graph/badge.svg)](https://codecov.io/gh/zhh2001/rote)
+[![Go Report Card](https://goreportcard.com/badge/github.com/zhh2001/rote)](https://goreportcard.com/report/github.com/zhh2001/rote)
+
 ![rote demo](docs/demo.gif)
 
 ## Why
