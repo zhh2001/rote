@@ -30,11 +30,21 @@ func cmdStart(ctx context.Context, logger *slog.Logger, jobs []config.Job, st *s
 	return eng.Run(ctx)
 }
 
-// cmdRun executes a single named job once, records it, and writes a summary.
-func cmdRun(ctx context.Context, w io.Writer, jobs []config.Job, st *store.Store, jobName string) error {
+// Exit codes for cmdRun, mirroring common shell/timeout conventions.
+const (
+	exitTimedOut  = 124 // job exceeded its timeout (as GNU timeout)
+	exitNotRun    = 126 // job was killed or could not start
+	exitNoSuchJob = 127 // job name not found in config
+)
+
+// cmdRun executes a single named job once, records it, writes a summary, and
+// returns the process exit code to use. A non-nil error is an operational
+// failure (its code is also returned); the job's own non-zero exit is reported
+// through the returned code with a nil error.
+func cmdRun(ctx context.Context, w io.Writer, jobs []config.Job, st *store.Store, jobName string) (int, error) {
 	job, ok := findJob(jobs, jobName)
 	if !ok {
-		return fmt.Errorf("job %q not found; available jobs: %s", jobName, availableNames(jobs))
+		return exitNoSuchJob, fmt.Errorf("job %q not found; available jobs: %s", jobName, availableNames(jobs))
 	}
 
 	res := runner.Run(ctx, runner.Spec{
@@ -45,11 +55,23 @@ func cmdRun(ctx context.Context, w io.Writer, jobs []config.Job, st *store.Store
 
 	// Record with a detached context so a canceled run is still persisted.
 	if _, err := st.Insert(context.Background(), toRecord(job.Name, res)); err != nil {
-		return fmt.Errorf("recording run: %w", err)
+		return 1, fmt.Errorf("recording run: %w", err)
 	}
 
 	writeRunSummary(w, job.Name, res)
-	return nil
+	return runExitCode(res), nil
+}
+
+// runExitCode maps a run result to a process exit code.
+func runExitCode(res runner.Result) int {
+	switch {
+	case res.TimedOut:
+		return exitTimedOut
+	case res.ExitCode == -1:
+		return exitNotRun
+	default:
+		return res.ExitCode
+	}
 }
 
 // cmdList prints each job with its next scheduled run and last recorded result.

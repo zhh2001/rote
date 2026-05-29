@@ -17,7 +17,8 @@ import (
 	"github.com/zhh2001/rote/internal/tui"
 )
 
-const version = "0.0.1-dev"
+// version is overridable at build time via -ldflags "-X main.version=<tag>".
+var version = "dev"
 
 func main() {
 	os.Exit(dispatch(os.Args[1:], os.Stdout, os.Stderr))
@@ -184,11 +185,11 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := cmdRun(ctx, stdout, jobs, st, fs.Arg(0)); err != nil {
+	code, err := cmdRun(ctx, stdout, jobs, st, fs.Arg(0))
+	if err != nil {
 		fmt.Fprintf(stderr, "rote: %v\n", err)
-		return 1
 	}
-	return 0
+	return code
 }
 
 func runList(args []string, stdout, stderr io.Writer) int {

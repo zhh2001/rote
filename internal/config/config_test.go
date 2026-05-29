@@ -204,3 +204,34 @@ schedule = "@hourly"
 		t.Errorf("Load(syntax error) succeeded, want error")
 	}
 }
+
+// 6. An unknown key is rejected and named, catching typos.
+func TestLoadUnknownKey(t *testing.T) {
+	path := write(t, `
+[[job]]
+name = "typo"
+schedule = "@hourly"
+command = "true"
+timout = "10m"
+`)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load succeeded, want error for unknown key")
+	}
+	if !strings.Contains(err.Error(), "timout") {
+		t.Errorf("error %q should name the unknown key %q", err.Error(), "timout")
+	}
+
+	// A correct file with all known keys must still load.
+	ok := write(t, `
+[[job]]
+name = "fine"
+schedule = "@hourly"
+command = "true"
+timeout = "10m"
+on_failure = "echo failed"
+`)
+	if _, err := Load(ok); err != nil {
+		t.Errorf("Load(valid) returned error: %v", err)
+	}
+}

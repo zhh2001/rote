@@ -5,16 +5,32 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"github.com/zhh2001/rote/internal/scheduler"
 	"github.com/zhh2001/rote/internal/store"
 )
 
-// statusSymbol renders run success as a compact glyph.
-func statusSymbol(success bool) string {
+var (
+	successGlyphStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("2")) // green
+	failGlyphStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("1")) // red
+)
+
+// statusGlyph is the bare success/failure glyph, without color.
+func statusGlyph(success bool) string {
 	if success {
 		return "✓"
 	}
 	return "✗"
+}
+
+// statusSymbol renders the success/failure glyph with color applied only to the
+// glyph itself, so surrounding table-column alignment is unaffected.
+func statusSymbol(success bool) string {
+	if success {
+		return successGlyphStyle.Render("✓")
+	}
+	return failGlyphStyle.Render("✗")
 }
 
 // formatCountdown renders a forward-looking duration with two units, e.g.

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -44,8 +45,19 @@ func Load(path string) ([]Job, error) {
 	}
 
 	var raw rawConfig
-	if _, err := toml.Decode(string(data), &raw); err != nil {
+	md, err := toml.Decode(string(data), &raw)
+	if err != nil {
 		return nil, fmt.Errorf("config: parse %q: %w", path, err)
+	}
+
+	// Reject unknown keys so typos like "timout" or "on_fail" are caught instead
+	// of being silently ignored.
+	if undecoded := md.Undecoded(); len(undecoded) > 0 {
+		keys := make([]string, len(undecoded))
+		for i, k := range undecoded {
+			keys[i] = k.String()
+		}
+		return nil, fmt.Errorf("config: %q has unknown key(s): %s", path, strings.Join(keys, ", "))
 	}
 
 	if len(raw.Jobs) == 0 {

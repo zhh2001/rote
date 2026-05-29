@@ -49,8 +49,12 @@ command = "echo hello-from-rote"
 	st := openStore(t)
 
 	var buf bytes.Buffer
-	if err := cmdRun(context.Background(), &buf, jobs, st, "greet"); err != nil {
+	code, err := cmdRun(context.Background(), &buf, jobs, st, "greet")
+	if err != nil {
 		t.Fatalf("cmdRun: %v", err)
+	}
+	if code != 0 {
+		t.Errorf("exit code = %d, want 0 for a successful job", code)
 	}
 
 	out := buf.String()
@@ -88,13 +92,61 @@ command = "true"
 	st := openStore(t)
 
 	var buf bytes.Buffer
-	err := cmdRun(context.Background(), &buf, jobs, st, "missing")
+	code, err := cmdRun(context.Background(), &buf, jobs, st, "missing")
 	if err == nil {
 		t.Fatal("cmdRun succeeded, want error")
+	}
+	if code != 127 {
+		t.Errorf("exit code = %d, want 127 for an unknown job", code)
 	}
 	msg := err.Error()
 	if !strings.Contains(msg, "missing") || !strings.Contains(msg, "not found") || !strings.Contains(msg, "greet") {
 		t.Errorf("error %q should name the job, say not found, and list available jobs", msg)
+	}
+}
+
+// 2c. The run exit code propagates: success, non-zero exit, and timeout.
+func TestCmdRunExitCodes(t *testing.T) {
+	cfg := writeConfig(t, `
+[[job]]
+name = "ok"
+schedule = "@hourly"
+command = "true"
+
+[[job]]
+name = "fail"
+schedule = "@hourly"
+command = "exit 3"
+
+[[job]]
+name = "slow"
+schedule = "@hourly"
+command = "sleep 5"
+timeout = "100ms"
+`)
+	jobs, err := config.Load(cfg)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	st := openStore(t)
+
+	cases := []struct {
+		job  string
+		want int
+	}{
+		{"ok", 0},
+		{"fail", 3},
+		{"slow", 124},
+	}
+	for _, c := range cases {
+		var buf bytes.Buffer
+		code, err := cmdRun(context.Background(), &buf, jobs, st, c.job)
+		if err != nil {
+			t.Fatalf("cmdRun(%s): %v", c.job, err)
+		}
+		if code != c.want {
+			t.Errorf("cmdRun(%s) exit code = %d, want %d", c.job, code, c.want)
+		}
 	}
 }
 
