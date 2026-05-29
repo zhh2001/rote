@@ -53,8 +53,8 @@ func TestHumanizeForms(t *testing.T) {
 		{"every 1h30m", ats(2026, 5, 29, 11, 30, 0)},
 		{"hourly", ats(2026, 5, 29, 11, 0, 0)},
 		{"daily", at(2026, 5, 30, 0, 0)},
-		{"weekly", at(2026, 5, 31, 0, 0)},  // next Sunday
-		{"monthly", at(2026, 6, 1, 0, 0)},  // first of next month
+		{"weekly", at(2026, 5, 31, 0, 0)}, // next Sunday
+		{"monthly", at(2026, 6, 1, 0, 0)}, // first of next month
 	}
 	for _, c := range cases {
 		assertNext(t, c.expr, ref, c.want)

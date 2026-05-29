@@ -85,49 +85,68 @@ func humanize(expr string) (string, error) {
 
 	switch {
 	case len(fields) == 1:
-		switch lower[0] {
-		case "hourly":
-			return "@hourly", nil
-		case "daily":
-			return "@daily", nil
-		case "weekly":
-			return "@weekly", nil
-		case "monthly":
-			return "@monthly", nil
-		default:
-			return strings.Join(fields, " "), nil
-		}
-
+		return humanizeDescriptor(fields, lower[0]), nil
 	case lower[0] == "every":
-		switch {
-		case len(fields) == 2:
-			dur := fields[1]
-			if !durationExpr.MatchString(dur) {
-				return "", fmt.Errorf("scheduler: invalid interval %q in %q: want a duration like 5m, 90s or 1h30m", dur, expr)
-			}
-			if _, err := time.ParseDuration(dur); err != nil {
-				return "", fmt.Errorf("scheduler: invalid interval %q in %q: %w", dur, expr, err)
-			}
-			return "@every " + dur, nil
-		case len(fields) == 4 && lower[2] == "at":
-			return weekdaySpec(lower[1], fields[3], expr)
-		default:
-			return "", fmt.Errorf("scheduler: invalid 'every' expression %q: want 'every <duration>' or 'every <weekday> at HH:MM'", expr)
-		}
-
+		return humanizeEvery(fields, lower, expr)
 	case lower[0] == "daily" && len(fields) == 3 && lower[1] == "at":
-		min, hour, err := parseClock(fields[2], expr)
-		if err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("%d %d * * *", min, hour), nil
-
+		return dailySpec(fields[2], expr)
 	case lower[0] == "weekly" && len(fields) == 5 && lower[1] == "on" && lower[3] == "at":
 		return weekdaySpec(lower[2], fields[4], expr)
-
 	default:
 		return strings.Join(fields, " "), nil
 	}
+}
+
+// humanizeDescriptor maps a single-word keyword to its cron descriptor, and
+// otherwise passes the token through unchanged (e.g. a one-field cron spec or a
+// raw "@hourly").
+func humanizeDescriptor(fields []string, word string) string {
+	switch word {
+	case "hourly":
+		return "@hourly"
+	case "daily":
+		return "@daily"
+	case "weekly":
+		return "@weekly"
+	case "monthly":
+		return "@monthly"
+	default:
+		return strings.Join(fields, " ")
+	}
+}
+
+// humanizeEvery handles the "every ..." forms: "every <duration>" and
+// "every <weekday> at HH:MM".
+func humanizeEvery(fields, lower []string, expr string) (string, error) {
+	switch {
+	case len(fields) == 2:
+		return everyDurationSpec(fields[1], expr)
+	case len(fields) == 4 && lower[2] == "at":
+		return weekdaySpec(lower[1], fields[3], expr)
+	default:
+		return "", fmt.Errorf("scheduler: invalid 'every' expression %q: want 'every <duration>' or 'every <weekday> at HH:MM'", expr)
+	}
+}
+
+// everyDurationSpec converts "every <duration>" into an "@every" descriptor,
+// accepting only lower-case h/m/s units.
+func everyDurationSpec(dur, expr string) (string, error) {
+	if !durationExpr.MatchString(dur) {
+		return "", fmt.Errorf("scheduler: invalid interval %q in %q: want a duration like 5m, 90s or 1h30m", dur, expr)
+	}
+	if _, err := time.ParseDuration(dur); err != nil {
+		return "", fmt.Errorf("scheduler: invalid interval %q in %q: %w", dur, expr, err)
+	}
+	return "@every " + dur, nil
+}
+
+// dailySpec converts "daily at HH:MM" into a cron spec.
+func dailySpec(clock, expr string) (string, error) {
+	min, hour, err := parseClock(clock, expr)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%d %d * * *", min, hour), nil
 }
 
 // weekdaySpec builds a cron spec that fires at the given clock time on a single

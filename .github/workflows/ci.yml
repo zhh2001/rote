@@ -20,6 +20,9 @@ jobs:
         with:
           go-version: stable
 
+      - name: Check formatting
+        run: test -z "$(gofmt -s -l .)"
+
       - name: Build
         run: go build ./...
 
