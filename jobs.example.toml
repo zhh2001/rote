@@ -1,0 +1,6 @@
+[[job]]
+name = "nightly-backup"
+schedule = "0 3 * * *"
+command = "/usr/local/bin/backup.sh --target /var/backups"
+timeout = "30m"
+on_failure = "notify"

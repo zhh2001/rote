@@ -1,0 +1,6 @@
+/rote
+dist/
+*.db
+*.sqlite
+jobs.toml
+.DS_Store
