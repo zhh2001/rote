@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -58,6 +61,8 @@ func dispatch(args []string, stdout, stderr io.Writer) int {
 		return runLogs(rest, stdout, stderr)
 	case "tui":
 		return runTUI(rest, stdout, stderr)
+	case "init":
+		return runInit(rest, stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "rote: unknown command %q\n\n", cmd)
 		printUsage(stderr)
@@ -270,7 +275,14 @@ func loadConfigAndStore(cfgFlag, dbFlag string, stderr io.Writer) ([]config.Job,
 	}
 	jobs, err := config.Load(cfgResolved)
 	if err != nil {
-		fmt.Fprintf(stderr, "rote: %v\n", err)
+		// A missing config is the common first-run case: point the user at the
+		// path and at `rote init`. Parse errors fall through unchanged.
+		if errors.Is(err, fs.ErrNotExist) {
+			fmt.Fprintf(stderr, "rote: no config file at %s\n", cfgResolved)
+			fmt.Fprintln(stderr, "run 'rote init' to create a starter config, then edit it")
+		} else {
+			fmt.Fprintf(stderr, "rote: %v\n", err)
+		}
 		return nil, nil, 1
 	}
 
@@ -285,6 +297,72 @@ func loadConfigAndStore(cfgFlag, dbFlag string, stderr io.Writer) ([]config.Job,
 		return nil, nil, 1
 	}
 	return jobs, st, 0
+}
+
+// starterConfig is the documented, immediately-runnable config written by
+// `rote init`. It uses only known keys so config.Load accepts it as-is.
+const starterConfig = `# rote job definitions.
+# Each [[job]] table describes one scheduled command.
+#
+#   name        unique label for the job (required)
+#   schedule    when to run (required). Standard 5-field cron, e.g.
+#               "*/15 * * * *", or a plain form:
+#                 every 5m / every 90s / every 1h30m
+#                 hourly / daily / weekly / monthly
+#                 daily at 03:00
+#                 every monday at 09:00
+#   command     shell command, run via "sh -c" (required)
+#   timeout     max run time, e.g. "30m" or "90s"; omit for no limit (optional)
+#   on_failure  command run once when the job fails (optional)
+
+[[job]]
+name = "example"
+schedule = "every 1m"
+command = "date"
+`
+
+// runInit writes the starter config to the resolved config path.
+func runInit(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("init", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var cfgFlag string
+	addConfigFlag(fs, &cfgFlag)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	cfgResolved, err := resolveConfigPath(cfgFlag)
+	if err != nil {
+		fmt.Fprintf(stderr, "rote: %v\n", err)
+		return 1
+	}
+	return cmdInit(stdout, stderr, cfgResolved)
+}
+
+// cmdInit writes the starter config to path, creating parent directories. It
+// never overwrites an existing file.
+func cmdInit(stdout, stderr io.Writer, path string) int {
+	if _, err := os.Stat(path); err == nil {
+		fmt.Fprintf(stdout, "config already exists at %s; not overwriting\n", path)
+		return 0
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		fmt.Fprintf(stderr, "rote: %v\n", err)
+		return 1
+	}
+
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			fmt.Fprintf(stderr, "rote: create config directory: %v\n", err)
+			return 1
+		}
+	}
+	if err := os.WriteFile(path, []byte(starterConfig), 0o644); err != nil {
+		fmt.Fprintf(stderr, "rote: write config: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "wrote starter config to %s — edit it, then run 'rote'\n", path)
+	return 0
 }
 
 func addConfigFlag(fs *flag.FlagSet, p *string) {
@@ -329,6 +407,7 @@ Usage:
 
 Commands:
   (no command)       run the scheduler and the dashboard together
+  init               write a starter jobs.toml to the config path
   tui                read-only dashboard for an already-running scheduler
   start              run the scheduler in the foreground until interrupted
   run <job>          run a single job once and record the result
@@ -336,7 +415,7 @@ Commands:
   logs <job>         show recent runs for a job
   version            print the version
 
-Flags (rote, tui, start, run, list):
+Flags (rote, init, tui, start, run, list):
   -c, --config PATH  config file (default: <user-config-dir>/rote/jobs.toml)
       --db PATH      database file (default: <state-dir>/rote/rote.db)
 
