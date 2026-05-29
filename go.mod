@@ -3,6 +3,7 @@ module github.com/zhh2001/rote
 go 1.25.0
 
 require (
+	github.com/BurntSushi/toml v1.6.0
 	github.com/robfig/cron/v3 v3.0.1
 	modernc.org/sqlite v1.51.0
 )
