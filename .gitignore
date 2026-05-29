@@ -6,5 +6,5 @@ dist/
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
-jobs.toml
+/jobs.toml
 .DS_Store
