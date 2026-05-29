@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -26,19 +27,26 @@ func main() {
 
 // dispatch routes a subcommand and returns the process exit code.
 func dispatch(args []string, stdout, stderr io.Writer) int {
-	// No subcommand runs the all-in-one mode: schedule jobs and show the live
-	// dashboard at once.
-	if len(args) == 0 {
-		return runIntegrated(nil, stdout, stderr)
+	// Help is explicit, whatever position it leads.
+	if len(args) > 0 {
+		switch args[0] {
+		case "help", "-h", "--help":
+			printUsage(stdout)
+			return 0
+		}
+	}
+
+	// With no arguments, or when the first argument is a flag, the user is
+	// invoking the default all-in-one command (scheduler + dashboard) and its
+	// flags. Hand the whole argument list to it.
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return runIntegrated(args, stdout, stderr)
 	}
 
 	cmd, rest := args[0], args[1:]
 	switch cmd {
 	case "version":
 		fmt.Fprintf(stdout, "rote %s\n", version)
-		return 0
-	case "help", "-h", "--help":
-		printUsage(stdout)
 		return 0
 	case "start":
 		return runStart(rest, stdout, stderr)
