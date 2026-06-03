@@ -21,18 +21,7 @@ err() {
 	exit 1
 }
 
-# fetch <url> writes the HTTP response body to stdout.
-fetch() {
-	if command -v curl >/dev/null 2>&1; then
-		curl -fsSL "$1"
-	elif command -v wget >/dev/null 2>&1; then
-		wget -qO- "$1"
-	else
-		err "need curl or wget to download files"
-	fi
-}
-
-# download <url> <dest> saves the URL to a file.
+# download <url> <dest> saves the URL to a file, following redirects.
 download() {
 	if command -v curl >/dev/null 2>&1; then
 		curl -fsSL "$1" -o "$2"
@@ -70,27 +59,28 @@ aarch64 | arm64) arch="arm64" ;;
 *) err "unsupported architecture: $machine" ;;
 esac
 
-# Resolve the version (tag) to install.
-version="${ROTE_VERSION:-}"
-if [ -z "$version" ]; then
-	info "resolving the latest release..."
-	version="$(fetch "https://api.github.com/repos/${REPO}/releases/latest" |
-		grep '"tag_name":' | head -n1 | cut -d'"' -f4)"
+# Build the release download base URL. Archive names carry no version, so the
+# tag is not needed up front: without ROTE_VERSION we use GitHub's
+# /releases/latest/download/ redirect, which resolves to the newest release's
+# assets without calling (and being rate-limited by) the GitHub API.
+if [ -n "${ROTE_VERSION:-}" ]; then
+	base_url="https://github.com/${REPO}/releases/download/${ROTE_VERSION}"
+	info "installing ${BINARY} ${ROTE_VERSION} for ${os}/${arch}"
+else
+	base_url="https://github.com/${REPO}/releases/latest/download"
+	info "installing the latest ${BINARY} for ${os}/${arch}"
 fi
-[ -n "$version" ] || err "could not determine the release version"
-info "installing ${BINARY} ${version} for ${os}/${arch}"
 
 # The asset name MUST match archives.name_template in .goreleaser.yaml:
 #   {{ .ProjectName }}_{{ title .Os }}_{{ amd64 -> x86_64 | else .Arch }}
 asset="${BINARY}_${os}_${arch}.tar.gz"
-base_url="https://github.com/${REPO}/releases/download/${version}"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
 info "downloading ${asset}..."
 download "${base_url}/${asset}" "${tmp}/${asset}" ||
-	err "failed to download ${asset} (is ${version} a published release?)"
+	err "failed to download ${asset} from ${base_url}"
 
 # Verify the checksum when a SHA-256 tool is available.
 info "downloading checksums.txt..."
@@ -125,4 +115,5 @@ else
 fi
 
 info "installed ${BINARY} to ${INSTALL_DIR}/${BINARY}"
+"${INSTALL_DIR}/${BINARY}" version
 info "run '${BINARY} init' to create a starter config, then '${BINARY}'"
