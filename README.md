@@ -21,17 +21,33 @@ actually printed.
 
 ## Install
 
+Install script (Linux and macOS) — downloads the right binary for your platform:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/zhh2001/rote/main/install.sh | sh
+```
+
+With Go:
+
 ```sh
 go install github.com/zhh2001/rote/cmd/rote@latest
 ```
-
-Or grab a prebuilt binary from the [Releases](https://github.com/zhh2001/rote/releases) page.
 
 Homebrew (available once the first release is tagged):
 
 ```sh
 brew install zhh2001/tap/rote
 ```
+
+Linux packages — download the `.deb`/`.rpm`/`.apk` for your architecture from the [Releases](https://github.com/zhh2001/rote/releases) page, then:
+
+```sh
+sudo dpkg -i rote_*.deb          # Debian/Ubuntu
+sudo rpm -i rote_*.rpm           # Fedora/RHEL/openSUSE
+apk add --allow-untrusted rote_*.apk   # Alpine
+```
+
+Or grab a prebuilt binary archive from the same Releases page.
 
 ## Quick start
 
@@ -82,7 +98,7 @@ silently ignored.
 
 Standard 5-field cron works:
 
-```
+```txt
 */15 * * * *      every 15 minutes
 0 3 * * *         03:00 daily
 0 9 * * 1         09:00 on Mondays
@@ -90,7 +106,7 @@ Standard 5-field cron works:
 
 So do these plain-language forms:
 
-```
+```txt
 every 5m          every 90s          every 1h30m
 hourly            daily              weekly            monthly
 daily at 03:00

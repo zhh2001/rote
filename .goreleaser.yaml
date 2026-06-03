@@ -32,6 +32,19 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
+nfpms:
+  - package_name: rote
+    vendor: zhh2001
+    homepage: "https://github.com/zhh2001/rote"
+    maintainer: "zhh2001 <zhh2001@users.noreply.github.com>"
+    description: "A cron that remembers what it did."
+    license: MIT
+    formats:
+      - deb
+      - rpm
+      - apk
+    # The binary lands in /usr/bin (nfpm default).
+
 changelog:
   sort: asc
   filters:
