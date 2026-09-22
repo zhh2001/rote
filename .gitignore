@@ -3,8 +3,10 @@ dist/
 *.db
 *.db-wal
 *.db-shm
+*.db.lock
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+*.sqlite.lock
 /jobs.toml
 .DS_Store

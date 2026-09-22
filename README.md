@@ -163,9 +163,9 @@ Watch it live from another terminal with `rote tui`.
 
 ## Caveats
 
-Don't run two schedulers against the same database. Running both `rote` and
-`rote start` (or two daemons) pointed at the same `--db` will execute every job
-twice. To watch a running scheduler, use the read-only `rote tui`.
+Only one scheduler (`rote` or `rote start`) may run against a database at a time. A second scheduler exits with an error. To watch a running scheduler, use the read-only `rote tui`; `list`, `logs`, and manual `run` also remain available. Manual runs are independent and may overlap a scheduled run.
+
+The scheduler holds an OS lock on `<database>.lock` beside the resolved database file, including through graceful shutdown while jobs finish. The lock is released automatically if the process exits or crashes. The empty lock file remains for reuse; do not delete it while a scheduler is running. Scheduling requires a file-backed database on Linux or macOS.
 
 ## License
 

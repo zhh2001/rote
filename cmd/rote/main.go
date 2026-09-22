@@ -82,7 +82,7 @@ func runTUI(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	jobs, st, code := loadConfigAndStore(cfgFlag, dbFlag, stderr)
+	jobs, st, code := loadConfigAndStore(cfgFlag, dbFlag, stderr, store.Open)
 	if code != 0 {
 		return code
 	}
@@ -101,9 +101,6 @@ func runTUI(args []string, stdout, stderr io.Writer) int {
 // runIntegrated schedules jobs (engine) while showing the live dashboard (TUI).
 // When the TUI exits for any reason, the engine's context is canceled and we
 // wait for it to finish before returning.
-//
-// TODO: add a lock to prevent a second scheduler (this mode or `rote start`)
-// from running against the same database and executing every job twice.
 func runIntegrated(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("rote", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -114,7 +111,7 @@ func runIntegrated(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	jobs, st, code := loadConfigAndStore(cfgFlag, dbFlag, stderr)
+	jobs, st, code := loadConfigAndStore(cfgFlag, dbFlag, stderr, store.OpenScheduler)
 	if code != 0 {
 		return code
 	}
@@ -156,7 +153,7 @@ func runStart(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	jobs, st, code := loadConfigAndStore(cfgFlag, dbFlag, stderr)
+	jobs, st, code := loadConfigAndStore(cfgFlag, dbFlag, stderr, store.OpenScheduler)
 	if code != 0 {
 		return code
 	}
@@ -189,7 +186,7 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	jobs, st, code := loadConfigAndStore(cfgFlag, dbFlag, stderr)
+	jobs, st, code := loadConfigAndStore(cfgFlag, dbFlag, stderr, store.Open)
 	if code != 0 {
 		return code
 	}
@@ -215,7 +212,7 @@ func runList(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	jobs, st, code := loadConfigAndStore(cfgFlag, dbFlag, stderr)
+	jobs, st, code := loadConfigAndStore(cfgFlag, dbFlag, stderr, store.Open)
 	if code != 0 {
 		return code
 	}
@@ -265,9 +262,10 @@ func runLogs(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// loadConfigAndStore resolves paths, loads the config, and opens the store. On
-// failure it writes a user-facing error to stderr and returns a non-zero code.
-func loadConfigAndStore(cfgFlag, dbFlag string, stderr io.Writer) ([]config.Job, *store.Store, int) {
+// loadConfigAndStore resolves paths, loads the config, and uses openStore to
+// open the store (with a scheduler lock when needed). On failure it writes a
+// user-facing error to stderr and returns a non-zero code.
+func loadConfigAndStore(cfgFlag, dbFlag string, stderr io.Writer, openStore func(string) (*store.Store, error)) ([]config.Job, *store.Store, int) {
 	cfgResolved, err := resolveConfigPath(cfgFlag)
 	if err != nil {
 		fmt.Fprintf(stderr, "rote: %v\n", err)
@@ -291,7 +289,7 @@ func loadConfigAndStore(cfgFlag, dbFlag string, stderr io.Writer) ([]config.Job,
 		fmt.Fprintf(stderr, "rote: %v\n", err)
 		return nil, nil, 1
 	}
-	st, err := store.Open(dbResolved)
+	st, err := openStore(dbResolved)
 	if err != nil {
 		fmt.Fprintf(stderr, "rote: %v\n", err)
 		return nil, nil, 1
@@ -424,8 +422,7 @@ logs flags:
   -n N               number of runs to show (default 20)
   -o, --output       also print the last run's stdout/stderr
 
-Note: do not run a scheduler twice against the same database. Running both
-'rote' and 'rote start' on the same db executes every job twice. To watch a
-running scheduler, use 'rote tui'.
+Only one scheduler ('rote' or 'rote start') may run against a database at a time.
+To watch a running scheduler, use 'rote tui'.
 `)
 }

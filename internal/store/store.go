@@ -3,9 +3,11 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -36,7 +38,10 @@ type Run struct {
 // Store persists run history in a SQLite database. Its methods are safe for
 // concurrent use by multiple goroutines.
 type Store struct {
-	db *sql.DB
+	db            *sql.DB
+	schedulerLock *os.File
+	closeOnce     sync.Once
+	closeErr      error
 }
 
 // runColumns lists the run table columns in the order scanRun expects.
@@ -86,9 +91,28 @@ func Open(path string) (*Store, error) {
 
 	s := &Store{db: db}
 	if err := s.migrate(context.Background()); err != nil {
-		db.Close()
+		s.Close()
 		return nil, err
 	}
+	return s, nil
+}
+
+// OpenScheduler opens a store and exclusively locks scheduling against its
+// database until Close. Other callers of Open may still read and write runs.
+// The lock is also released by the OS if the scheduler process exits abruptly.
+func OpenScheduler(path string) (*Store, error) {
+	// Acquire before initializing WAL or the schema, so simultaneous starts on
+	// a new database cannot race its initialization before reaching the lock.
+	lock, err := lockScheduler(path)
+	if err != nil {
+		return nil, err
+	}
+	s, err := Open(path)
+	if err != nil {
+		lock.Close()
+		return nil, err
+	}
+	s.schedulerLock = lock
 	return s, nil
 }
 
@@ -104,9 +128,15 @@ func (s *Store) migrate(ctx context.Context) error {
 	return nil
 }
 
-// Close releases the underlying database handle.
+// Close releases the database handle, then any scheduler lock. It is idempotent.
 func (s *Store) Close() error {
-	return s.db.Close()
+	s.closeOnce.Do(func() {
+		s.closeErr = s.db.Close()
+		if s.schedulerLock != nil {
+			s.closeErr = errors.Join(s.closeErr, s.schedulerLock.Close())
+		}
+	})
+	return s.closeErr
 }
 
 // Insert stores a run and returns its new row id.
