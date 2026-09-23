@@ -6,12 +6,14 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/zhh2001/rote/internal/config"
+	"github.com/zhh2001/rote/internal/runner"
 	"github.com/zhh2001/rote/internal/store"
 )
 
@@ -22,6 +24,37 @@ func writeConfig(t *testing.T, content string) string {
 		t.Fatalf("write config: %v", err)
 	}
 	return path
+}
+
+func TestRunExitCode(t *testing.T) {
+	// Preserve all shell exit codes for commands that completed without a
+	// runner-level error. Only a successful result may map to exit code zero.
+	for code := 0; code <= 255; code++ {
+		res := runner.Result{ExitCode: code}
+		if got := runExitCode(res); got != code {
+			t.Errorf("command exit %d mapped to %d", code, got)
+		}
+	}
+	cases := []struct {
+		name string
+		res  runner.Result
+		want int
+	}{
+		{"start failure", runner.Result{ExitCode: -1, Err: exec.ErrNotFound}, 126},
+		{"signal termination", runner.Result{ExitCode: -1}, 126},
+		{"output wait failure", runner.Result{ExitCode: 0, Err: exec.ErrWaitDelay}, 126},
+		{"execution error", runner.Result{ExitCode: 3, Err: io.ErrUnexpectedEOF}, 126},
+		{"timeout after shell exit", runner.Result{ExitCode: 0, TimedOut: true}, 124},
+		{"timeout after kill", runner.Result{ExitCode: -1, TimedOut: true}, 124},
+		{"timeout takes precedence", runner.Result{ExitCode: 0, TimedOut: true, Err: exec.ErrWaitDelay}, 124},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := runExitCode(tc.res); got != tc.want {
+				t.Errorf("runExitCode(%+v)=%d, want %d", tc.res, got, tc.want)
+			}
+		})
+	}
 }
 
 func openStore(t *testing.T) *store.Store {

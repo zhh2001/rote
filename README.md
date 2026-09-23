@@ -87,7 +87,7 @@ Jobs live in a TOML file as an array of `[[job]]` tables:
 | `name`       | yes      | Unique label for the job.                                |
 | `schedule`   | yes      | When to run (see below).                                 |
 | `command`    | yes      | Shell command, run via `sh -c`.                          |
-| `timeout`    | no       | Max run time, e.g. `"30m"`, `"90s"`. Omit for no limit.  |
+| `timeout`    | no       | Non-negative max run time, e.g. `"30m"`, `"90s"`. Omit or use `"0s"` for no limit. |
 | `on_failure` | no       | Command run once when the job fails.                     |
 
 Unknown keys are rejected, so a misspelled `timout` is caught instead of
@@ -127,10 +127,12 @@ rounded up.
 | `rote`                        | Schedule jobs and show the live dashboard together.                 |
 | `rote start`                  | Run the scheduler headless, as a daemon.                            |
 | `rote tui`                    | Read-only dashboard for an already-running scheduler.               |
-| `rote run <job>`              | Run one job now, record it, and print a summary. Propagates the exit code (`124` on timeout, `127` if the job isn't found). |
+| `rote run <job>`              | Run one job now, record it, and print a summary. Propagates the command's exit code (`124` on timeout, `126` on runner error or signal termination, `127` if the job isn't found). |
 | `rote list`                   | List jobs with their next and last run.                             |
 | `rote logs <job> [-n N] [-o]` | Recent runs for a job; `-n` limits the count, `-o` includes the last run's output. |
 | `rote version`                | Print the version.                                                  |
+
+The recorded and displayed exit code belongs to the shell process. If the shell exits successfully but output capture fails, the run is marked failed and `rote run` exits with `126`; the recorded shell exit code remains `0`.
 
 In the dashboard: `↑`/`↓` (or `k`/`j`) to move, `Enter` to open a job's history,
 `Tab` to switch between the history list and the output pane, `Esc` to go back,

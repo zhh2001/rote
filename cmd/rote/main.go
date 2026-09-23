@@ -310,7 +310,8 @@ const starterConfig = `# rote job definitions.
 #                 daily at 03:00
 #                 every monday at 09:00
 #   command     shell command, run via "sh -c" (required)
-#   timeout     max run time, e.g. "30m" or "90s"; omit for no limit (optional)
+#   timeout     non-negative max run time, e.g. "30m" or "90s" (optional)
+#               omit or use "0s" for no limit
 #   on_failure  command run once when the job fails (optional)
 
 [[job]]

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,75 @@ func write(t *testing.T, content string) string {
 		t.Fatalf("write temp file: %v", err)
 	}
 	return path
+}
+
+func TestLoadTimeoutBounds(t *testing.T) {
+	cases := []struct {
+		timeout string
+		want    time.Duration
+		invalid bool
+	}{
+		{timeout: ""},
+		{timeout: "0"},
+		{timeout: "0s"},
+		{timeout: "1ns", want: time.Nanosecond},
+		{timeout: "100ms", want: 100 * time.Millisecond},
+		{timeout: "1h30m", want: 90 * time.Minute},
+		{timeout: "9223372036854775807ns", want: time.Duration(1<<63 - 1)},
+		{timeout: "-1ns", invalid: true},
+		{timeout: "-100ms", invalid: true},
+		{timeout: "-1h30m", invalid: true},
+		{timeout: "-9223372036854775808ns", invalid: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.timeout, func(t *testing.T) {
+			content := "[[job]]\nname='bounded'\nschedule='every 1m'\ncommand='true'\n"
+			if tc.timeout != "" {
+				content += fmt.Sprintf("timeout=%q\n", tc.timeout)
+			}
+			jobs, err := Load(write(t, content))
+			if tc.invalid {
+				if err == nil || jobs != nil {
+					t.Fatalf("negative timeout accepted: jobs=%+v err=%v", jobs, err)
+				}
+				for _, text := range []string{"bounded", "timeout", tc.timeout, "non-negative"} {
+					if !strings.Contains(err.Error(), text) {
+						t.Errorf("error %q does not contain %q", err, text)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(jobs) != 1 || jobs[0].Timeout != tc.want {
+				t.Fatalf("jobs=%+v, want timeout %v", jobs, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoadNegativeTimeoutCollectsOtherErrors(t *testing.T) {
+	_, err := Load(write(t, `
+[[job]]
+name = "negative"
+schedule = "@hourly"
+command = "true"
+timeout = "-1s"
+
+[[job]]
+name = "empty-command"
+schedule = "@hourly"
+command = ""
+`))
+	if err == nil {
+		t.Fatal("invalid config accepted")
+	}
+	for _, text := range []string{"negative", "timeout", "non-negative", "empty-command", "command must not be empty"} {
+		if !strings.Contains(err.Error(), text) {
+			t.Errorf("combined error %q does not contain %q", err, text)
+		}
+	}
 }
 
 // 1. A valid file with mixed optional fields parses correctly.

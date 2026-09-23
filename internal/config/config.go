@@ -102,6 +102,8 @@ func Load(path string) ([]Job, error) {
 			d, err := time.ParseDuration(rj.Timeout)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("%s: invalid timeout %q: %w", label, rj.Timeout, err))
+			} else if d < 0 {
+				errs = append(errs, fmt.Errorf("%s: invalid timeout %q: must be non-negative (0 means no limit)", label, rj.Timeout))
 			} else {
 				job.Timeout = d
 			}

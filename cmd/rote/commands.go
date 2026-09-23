@@ -33,7 +33,7 @@ func cmdStart(ctx context.Context, logger *slog.Logger, jobs []config.Job, st *s
 // Exit codes for cmdRun, mirroring common shell/timeout conventions.
 const (
 	exitTimedOut  = 124 // job exceeded its timeout (as GNU timeout)
-	exitNotRun    = 126 // job was killed or could not start
+	exitNotRun    = 126 // runner error, start failure, or signal termination
 	exitNoSuchJob = 127 // job name not found in config
 )
 
@@ -67,7 +67,7 @@ func runExitCode(res runner.Result) int {
 	switch {
 	case res.TimedOut:
 		return exitTimedOut
-	case res.ExitCode == -1:
+	case res.Err != nil || res.ExitCode == -1:
 		return exitNotRun
 	default:
 		return res.ExitCode
