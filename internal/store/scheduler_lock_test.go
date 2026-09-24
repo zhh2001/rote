@@ -88,6 +88,54 @@ func TestSchedulerLockLifecycle(t *testing.T) {
 	}
 }
 
+func TestSchedulerCloseWaitsForAdmittedWrite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rote.db")
+	s := mustOpenScheduler(t, path)
+	if _, err := s.Insert(context.Background(), makeRun("seed", base)); err != nil {
+		t.Fatal(err)
+	}
+	release := holdSQLiteWriter(t, s)
+	writeDone := make(chan struct{})
+	var writeErr error
+	go func() {
+		defer close(writeDone)
+		_, writeErr = s.InsertWithRetention(context.Background(), makeRun("seed", base.Add(time.Hour)), 1)
+	}()
+	defer func() { release(); <-writeDone }()
+	waitForConnections(t, s, 2)
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- s.Close() }()
+	select {
+	case <-s.closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close did not start")
+	}
+	// Closing the queue must not release scheduler ownership while its
+	// previously admitted transaction is still trying to persist a result.
+	assertSchedulerLocked(t, path)
+	if err := s.Prune(context.Background(), "seed", 0); !errors.Is(err, errStoreClosed) {
+		t.Fatalf("write accepted while closing: %v", err)
+	}
+	release()
+	<-writeDone
+	if writeErr != nil {
+		t.Fatalf("admitted transaction lost during Close: %v", writeErr)
+	}
+	select {
+	case err := <-closeDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close did not complete")
+	}
+	next := mustOpenScheduler(t, path)
+	rows, err := next.RecentRuns(context.Background(), "seed", 0)
+	if err != nil || len(rows) != 1 || !rows[0].StartedAt.Equal(base.Add(time.Hour)) {
+		t.Fatalf("admitted retention transaction was not committed: %+v, %v", rows, err)
+	}
+}
+
 func TestSchedulerLockPathAliases(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)

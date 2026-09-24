@@ -39,6 +39,9 @@ type Run struct {
 // concurrent use by multiple goroutines.
 type Store struct {
 	db            *sql.DB
+	writes        chan struct{}
+	releaseWrites func()
+	closed        chan struct{}
 	schedulerLock *os.File
 	closeOnce     sync.Once
 	closeErr      error
@@ -70,8 +73,9 @@ CREATE INDEX IF NOT EXISTS idx_runs_job_started ON runs (job_name, started_at)`
 
 // Open opens (creating if necessary) the SQLite database at path, creating any
 // missing parent directories, and applies the schema idempotently. WAL mode and
-// a busy timeout are enabled on every connection so that concurrent writers wait
-// rather than fail with "database is locked".
+// a busy timeout are enabled on every connection. Writes are
+// serialized across Stores for the same file in this process. Other processes
+// can still exhaust SQLite's busy timeout.
 func Open(path string) (*Store, error) {
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -89,7 +93,12 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("store: open database: %w", err)
 	}
 
-	s := &Store{db: db}
+	writes, release, err := acquireWriteQueue(db)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	s := &Store{db: db, writes: writes, releaseWrites: release, closed: make(chan struct{})}
 	if err := s.migrate(context.Background()); err != nil {
 		s.Close()
 		return nil, err
@@ -117,6 +126,10 @@ func OpenScheduler(path string) (*Store, error) {
 }
 
 func (s *Store) migrate(ctx context.Context) error {
+	if err := s.lockWrite(ctx); err != nil {
+		return fmt.Errorf("store: apply schema: %w", err)
+	}
+	defer s.unlockWrite()
 	for _, stmt := range []string{createTableSQL, createIndexSQL} {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("store: apply schema: %w", err)
@@ -128,19 +141,28 @@ func (s *Store) migrate(ctx context.Context) error {
 	return nil
 }
 
-// Close releases the database handle, then any scheduler lock. It is idempotent.
+// Close rejects queued writes, waits for the admitted write to finish, then
+// releases the database handle and any scheduler lock. It is idempotent.
 func (s *Store) Close() error {
 	s.closeOnce.Do(func() {
+		close(s.closed)
+		s.writes <- struct{}{}
+		defer s.unlockWrite()
 		s.closeErr = s.db.Close()
 		if s.schedulerLock != nil {
 			s.closeErr = errors.Join(s.closeErr, s.schedulerLock.Close())
 		}
+		s.releaseWrites()
 	})
 	return s.closeErr
 }
 
 // Insert stores a run and returns its new row id.
 func (s *Store) Insert(ctx context.Context, r Run) (int64, error) {
+	if err := s.lockWrite(ctx); err != nil {
+		return 0, fmt.Errorf("store: insert run: %w", err)
+	}
+	defer s.unlockWrite()
 	return insertRun(ctx, s.db, r)
 }
 
@@ -271,6 +293,10 @@ WHERE id IN (`+latestRunIDs+`)`)
 // Prune keeps only the newest keep runs for jobName, deleting older ones. Other
 // jobs are unaffected. A non-positive keep deletes all runs for the job.
 func (s *Store) Prune(ctx context.Context, jobName string, keep int) error {
+	if err := s.lockWrite(ctx); err != nil {
+		return fmt.Errorf("store: prune: %w", err)
+	}
+	defer s.unlockWrite()
 	return pruneRuns(ctx, s.db, jobName, keep)
 }
 

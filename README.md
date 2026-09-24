@@ -9,14 +9,9 @@
 
 ## Why
 
-`cron` runs your jobs and forgets them. When a backup silently stops firing or a
-script starts exiting non-zero at 3am, there's nothing to look at — no exit
-code, no timing, no output, often no sign it ran at all.
+`cron` runs your jobs and forgets them. When a backup silently stops firing or a script starts exiting non-zero at 3am, there's nothing to look at — no exit code, no timing, no output, often no sign it ran at all.
 
-rote runs jobs on a schedule and records every run: exit code, duration, whether
-it timed out, and the captured stdout/stderr. A terminal dashboard shows, at a
-glance, which jobs are healthy, when each runs next, and what the last failure
-actually printed.
+rote runs jobs on a schedule and records every run: exit code, duration, whether it timed out, and the captured stdout/stderr. A terminal dashboard shows, at a glance, which jobs are healthy, when each runs next, and what the last failure actually printed.
 
 ## Install
 
@@ -91,26 +86,19 @@ Jobs live in a TOML file as an array of `[[job]]` tables:
 | `on_failure`    | no       | Command run once when the job fails.                                                            |
 | `history_limit` | no       | Non-negative integer: keep the newest N runs for this job. Omit or use `0` to keep all history. |
 
-Unknown keys are rejected, so a misspelled `timout` is caught instead of
-silently ignored.
+Unknown keys are rejected, so a misspelled `timout` is caught instead of silently ignored.
 
 ### History retention
 
-History is unlimited by default. To opt in to automatic cleanup, add, for
-example, `history_limit = 1000` inside a job's `[[job]]` table. After each run,
-scheduled or manual, rote stores its result and removes that job's older records
-in one transaction. If either operation fails, the transaction is rolled back
-and existing history is left unchanged. Other jobs are unaffected.
+History is unlimited by default. To opt in to automatic cleanup, add, for example, `history_limit = 1000` inside a job's `[[job]]` table. After each run, scheduled or manual, rote stores its result and removes that job's older records in one transaction. If either operation fails, the transaction is rolled back and existing history is left unchanged. Other jobs are unaffected.
 
-The limit counts all results, including failures, timeouts, and cancellations.
-"Newest" means latest start time, with the record ID breaking ties, matching the
-history display. A long-running job that finishes after newer runs can therefore
-fall outside the retained window. Manual runs and the scheduler should use the
-same configuration to apply the same limit.
+The limit counts all results, including failures, timeouts, and cancellations. "Newest" means latest start time, with the record ID breaking ties, matching the history display. A long-running job that finishes after newer runs can therefore fall outside the retained window. Manual runs and the scheduler should use the same configuration to apply the same limit.
 
 Cleanup first takes effect when that job next records a run; merely starting a viewer, running `list`/`logs`, or loading configuration never prunes history. Removing the setting or setting it to `0` stops future cleanup but cannot restore deleted records or their captured output. Back up the database before enabling or lowering a limit if you need to preserve that history.
 
 Freed SQLite pages can be reused by later writes; the database file does not necessarily shrink immediately. No automatic `VACUUM` is performed. This is a record-count limit, not a database byte quota.
+
+Within one process, handles for the same database share a write queue, including the entire insert-and-retain transaction, while history reads and unrelated databases remain independent. Relative paths, file URIs, and symlinks resolving to the same filename share that queue. A write waiting locally can be canceled without waiting for SQLite's busy timeout. Different processes still coordinate through SQLite; an external writer holding the database lock too long can still cause the existing five-second busy timeout. Writes are not retried automatically, and a persistence failure is reported rather than treated as a saved result.
 
 ### Schedule syntax
 
@@ -131,8 +119,7 @@ daily at 03:00
 every monday at 09:00
 ```
 
-The smallest effective interval is about **1 second** — sub-second schedules are
-rounded up.
+The smallest effective interval is about **1 second** — sub-second schedules are rounded up.
 
 ### Files
 
@@ -157,9 +144,7 @@ The recorded and displayed exit code belongs to the shell process. If the shell 
 
 Canceling a manual run with Ctrl+C or SIGTERM terminates its process group, records `context canceled` as a failure (not a timeout), and exits with `126`, including when the shell already exited but a descendant still held its output pipes open.
 
-In the dashboard: `↑`/`↓` (or `k`/`j`) to move, `Enter` to open a job's history,
-`Tab` to switch between the history list and the output pane, `Esc` to go back,
-`r` to refresh, `?` for help, `q` to quit.
+In the dashboard: `↑`/`↓` (or `k`/`j`) to move, `Enter` to open a job's history, `Tab` to switch between the history list and the output pane, `Esc` to go back, `r` to refresh, `?` for help, `q` to quit.
 
 ## Running as a service
 

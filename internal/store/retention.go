@@ -17,6 +17,10 @@ func (s *Store) InsertWithRetention(ctx context.Context, r Run, keep int) (int64
 	if keep == 0 {
 		return s.Insert(ctx, r)
 	}
+	if err := s.lockWrite(ctx); err != nil {
+		return 0, fmt.Errorf("store: begin retention transaction: %w", err)
+	}
+	defer s.unlockWrite()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("store: begin retention transaction: %w", err)
