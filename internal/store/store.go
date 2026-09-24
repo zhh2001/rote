@@ -141,7 +141,16 @@ func (s *Store) Close() error {
 
 // Insert stores a run and returns its new row id.
 func (s *Store) Insert(ctx context.Context, r Run) (int64, error) {
-	res, err := s.db.ExecContext(ctx, `
+	return insertRun(ctx, s.db, r)
+}
+
+// executor is implemented by both a database handle and a transaction.
+type executor interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func insertRun(ctx context.Context, db executor, r Run) (int64, error) {
+	res, err := db.ExecContext(ctx, `
 INSERT INTO runs (job_name, started_at, finished_at, duration, exit_code,
                   timed_out, success, stdout, stderr, stdout_truncated,
                   stderr_truncated, err)
@@ -253,10 +262,14 @@ WHERE rn = 1`)
 // Prune keeps only the newest keep runs for jobName, deleting older ones. Other
 // jobs are unaffected. A non-positive keep deletes all runs for the job.
 func (s *Store) Prune(ctx context.Context, jobName string, keep int) error {
+	return pruneRuns(ctx, s.db, jobName, keep)
+}
+
+func pruneRuns(ctx context.Context, db executor, jobName string, keep int) error {
 	if keep < 0 {
 		keep = 0
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := db.ExecContext(ctx, `
 DELETE FROM runs
 WHERE job_name = ?
   AND id NOT IN (

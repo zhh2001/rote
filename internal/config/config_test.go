@@ -19,6 +19,51 @@ func write(t *testing.T, content string) string {
 	return path
 }
 
+func TestLoadHistoryLimit(t *testing.T) {
+	maxInt := int(^uint(0) >> 1)
+	for _, tc := range []struct {
+		value   string
+		want    int
+		invalid bool
+	}{
+		{value: ""}, {value: "0"}, {value: "1", want: 1},
+		{value: "1000", want: 1000}, {value: fmt.Sprint(maxInt), want: maxInt},
+		{value: "-1", invalid: true}, {value: "-100", invalid: true},
+		{value: "1.5", invalid: true}, {value: "1.0", invalid: true},
+		{value: "'2'", invalid: true}, {value: "true", invalid: true},
+		{value: "[]", invalid: true}, {value: "9223372036854775808", invalid: true},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			content := "[[job]]\nname='bounded'\nschedule='@hourly'\ncommand='true'\n"
+			if tc.value != "" {
+				content += "history_limit=" + tc.value + "\n"
+			}
+			jobs, err := Load(write(t, content))
+			if tc.invalid {
+				if err == nil || jobs != nil || !strings.Contains(err.Error(), "history_limit") {
+					t.Fatalf("invalid history limit accepted or poorly diagnosed: jobs=%+v err=%v", jobs, err)
+				}
+				return
+			}
+			if err != nil || len(jobs) != 1 || jobs[0].HistoryLimit != tc.want {
+				t.Fatalf("jobs=%+v err=%v, want history limit %d", jobs, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoadHistoryLimitCollectsOtherErrors(t *testing.T) {
+	jobs, err := Load(write(t, "[[job]]\nname='bad'\nschedule='@hourly'\ncommand=''\ntimeout='-1s'\nhistory_limit=-1\n"))
+	if err == nil || jobs != nil {
+		t.Fatalf("invalid config accepted: jobs=%+v err=%v", jobs, err)
+	}
+	for _, text := range []string{"bad", "command must not be empty", "timeout", "history_limit", "non-negative"} {
+		if !strings.Contains(err.Error(), text) {
+			t.Errorf("combined error %q missing %q", err, text)
+		}
+	}
+}
+
 func TestLoadTimeoutBounds(t *testing.T) {
 	cases := []struct {
 		timeout string

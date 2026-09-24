@@ -312,6 +312,8 @@ const starterConfig = `# rote job definitions.
 #   timeout     non-negative max run time, e.g. "30m" or "90s" (optional)
 #               omit or use "0s" for no limit
 #   on_failure  command run once when the job fails (optional)
+#   history_limit  newest runs to keep for this job (optional, integer)
+#                  omit or use 0 to keep all; positive values delete older runs
 
 [[job]]
 name = "example"

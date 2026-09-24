@@ -4,3 +4,5 @@ schedule = "0 3 * * *"
 command = "/usr/local/bin/backup.sh --target /var/backups"
 timeout = "30m"
 on_failure = "notify"
+# Optional: permanently delete older history after each recorded run.
+# history_limit = 1000

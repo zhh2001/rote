@@ -82,16 +82,35 @@ rote start
 
 Jobs live in a TOML file as an array of `[[job]]` tables:
 
-| Field        | Required | Description                                                                        |
-| ------------ | -------- | ---------------------------------------------------------------------------------- |
-| `name`       | yes      | Unique label for the job.                                                          |
-| `schedule`   | yes      | When to run (see below).                                                           |
-| `command`    | yes      | Shell command, run via `sh -c`.                                                    |
-| `timeout`    | no       | Non-negative max run time, e.g. `"30m"`, `"90s"`. Omit or use `"0s"` for no limit. |
-| `on_failure` | no       | Command run once when the job fails.                                               |
+| Field           | Required | Description                                                                                     |
+| --------------- | -------- | ----------------------------------------------------------------------------------------------- |
+| `name`          | yes      | Unique label for the job.                                                                       |
+| `schedule`      | yes      | When to run (see below).                                                                        |
+| `command`       | yes      | Shell command, run via `sh -c`.                                                                 |
+| `timeout`       | no       | Non-negative max run time, e.g. `"30m"`, `"90s"`. Omit or use `"0s"` for no limit.              |
+| `on_failure`    | no       | Command run once when the job fails.                                                            |
+| `history_limit` | no       | Non-negative integer: keep the newest N runs for this job. Omit or use `0` to keep all history. |
 
 Unknown keys are rejected, so a misspelled `timout` is caught instead of
 silently ignored.
+
+### History retention
+
+History is unlimited by default. To opt in to automatic cleanup, add, for
+example, `history_limit = 1000` inside a job's `[[job]]` table. After each run,
+scheduled or manual, rote stores its result and removes that job's older records
+in one transaction. If either operation fails, the transaction is rolled back
+and existing history is left unchanged. Other jobs are unaffected.
+
+The limit counts all results, including failures, timeouts, and cancellations.
+"Newest" means latest start time, with the record ID breaking ties, matching the
+history display. A long-running job that finishes after newer runs can therefore
+fall outside the retained window. Manual runs and the scheduler should use the
+same configuration to apply the same limit.
+
+Cleanup first takes effect when that job next records a run; merely starting a viewer, running `list`/`logs`, or loading configuration never prunes history. Removing the setting or setting it to `0` stops future cleanup but cannot restore deleted records or their captured output. Back up the database before enabling or lowering a limit if you need to preserve that history.
+
+Freed SQLite pages can be reused by later writes; the database file does not necessarily shrink immediately. No automatic `VACUUM` is performed. This is a record-count limit, not a database byte quota.
 
 ### Schedule syntax
 

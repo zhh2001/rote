@@ -163,7 +163,7 @@ func (e *Engine) execute(j *jobEntry) {
 		StderrTruncated: res.StderrTruncated,
 		Err:             errString(res.Err),
 	}
-	if _, err := e.store.Insert(context.Background(), rec); err != nil {
+	if _, err := e.store.InsertWithRetention(context.Background(), rec, j.cfg.HistoryLimit); err != nil {
 		e.logger.Error("failed to record run", "job", j.cfg.Name, "err", err)
 	}
 

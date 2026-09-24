@@ -32,6 +32,31 @@ func TestRunAlreadyCanceledDoesNotInitializeTerminal(t *testing.T) {
 	}
 }
 
+func TestRefreshAfterRetentionRemovesSelectedRun(t *testing.T) {
+	st := openStore(t)
+	ctx := context.Background()
+	for i := 0; i < 4; i++ {
+		insertRun(t, st, "alpha", time.Now().Add(-time.Hour+time.Duration(i)*time.Minute), true, 0, time.Second, "old-output")
+	}
+	m := newModel(ctx, []config.Job{{Name: "alpha", Schedule: "@hourly", HistoryLimit: 1}}, st)
+	m = update(m, keyType(tea.KeyEnter))
+	m.histTbl.SetCursor(3)
+	m.refreshOutput()
+	id, err := st.InsertWithRetention(ctx, store.Run{
+		JobName: "alpha", StartedAt: time.Now(), Success: true, Stdout: []byte("retained-output"),
+	}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m = update(m, tickMsg(time.Now()))
+	if m.loadErr != nil || len(m.history) != 1 || m.outputID != id || !m.outputOK || m.histTbl.Cursor() != 0 {
+		t.Fatalf("view did not recover after pruning: history=%d outputID=%d cursor=%d err=%v", len(m.history), m.outputID, m.histTbl.Cursor(), m.loadErr)
+	}
+	if string(m.output.Stdout) != "retained-output" {
+		t.Errorf("view still shows pruned output: %q", m.output.Stdout)
+	}
+}
+
 func openStore(t *testing.T) *store.Store {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "rote.db"))

@@ -15,11 +15,12 @@ import (
 
 // Job is a validated job definition.
 type Job struct {
-	Name      string
-	Schedule  string
-	Command   string
-	Timeout   time.Duration // parsed from the TOML string; 0 means no limit
-	OnFailure string        // optional
+	Name         string
+	Schedule     string
+	Command      string
+	Timeout      time.Duration // parsed from the TOML string; 0 means no limit
+	OnFailure    string        // optional
+	HistoryLimit int           // 0 keeps all history; positive values keep the newest N runs
 }
 
 // rawConfig mirrors the on-disk TOML structure before validation.
@@ -28,11 +29,12 @@ type rawConfig struct {
 }
 
 type rawJob struct {
-	Name      string `toml:"name"`
-	Schedule  string `toml:"schedule"`
-	Command   string `toml:"command"`
-	Timeout   string `toml:"timeout"`
-	OnFailure string `toml:"on_failure"`
+	Name         string `toml:"name"`
+	Schedule     string `toml:"schedule"`
+	Command      string `toml:"command"`
+	Timeout      string `toml:"timeout"`
+	OnFailure    string `toml:"on_failure"`
+	HistoryLimit int    `toml:"history_limit"`
 }
 
 // Load reads, parses, and validates the jobs.toml file at path. It returns all
@@ -75,10 +77,11 @@ func Load(path string) ([]Job, error) {
 		}
 
 		job := Job{
-			Name:      rj.Name,
-			Schedule:  rj.Schedule,
-			Command:   rj.Command,
-			OnFailure: rj.OnFailure,
+			Name:         rj.Name,
+			Schedule:     rj.Schedule,
+			Command:      rj.Command,
+			OnFailure:    rj.OnFailure,
+			HistoryLimit: rj.HistoryLimit,
 		}
 
 		switch {
@@ -92,6 +95,9 @@ func Load(path string) ([]Job, error) {
 
 		if rj.Command == "" {
 			errs = append(errs, fmt.Errorf("%s: command must not be empty", label))
+		}
+		if rj.HistoryLimit < 0 {
+			errs = append(errs, fmt.Errorf("%s: history_limit must be non-negative (0 keeps all history)", label))
 		}
 
 		if _, err := scheduler.Parse(rj.Schedule); err != nil {

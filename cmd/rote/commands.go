@@ -65,7 +65,7 @@ func cmdRun(ctx context.Context, w io.Writer, jobs []config.Job, st *store.Store
 	})
 
 	// Record with a detached context so a canceled run is still persisted.
-	if _, err := st.Insert(context.Background(), toRecord(job.Name, res)); err != nil {
+	if _, err := st.InsertWithRetention(context.Background(), toRecord(job.Name, res), job.HistoryLimit); err != nil {
 		return 1, fmt.Errorf("recording run: %w", err)
 	}
 
