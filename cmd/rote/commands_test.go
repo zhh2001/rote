@@ -322,7 +322,10 @@ command = "true"
 
 	ctx, cancel := context.WithCancel(context.Background())
 	errc := make(chan error, 1)
-	go func() { errc <- cmdStart(ctx, logger, jobs, st) }()
+	go func() {
+		_, err := cmdStart(ctx, logger, jobs, st)
+		errc <- err
+	}()
 
 	time.Sleep(50 * time.Millisecond)
 	cancel()

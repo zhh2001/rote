@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -180,6 +181,47 @@ func TestRunExternalCancel(t *testing.T) {
 	}
 	if res.Success() {
 		t.Errorf("Success() = true, want false")
+	}
+	if !errors.Is(res.Err, context.Canceled) {
+		t.Errorf("Err = %v, want context.Canceled", res.Err)
+	}
+}
+
+func TestRunAlreadyCanceled(t *testing.T) {
+	for _, deadline := range []bool{false, true} {
+		t.Run(fmt.Sprintf("deadline=%t", deadline), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			if deadline {
+				cancel()
+				ctx, cancel = context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+			}
+			cancel()
+			marker := filepath.Join(t.TempDir(), "must-not-run")
+			res := Run(ctx, Spec{Command: fmt.Sprintf("touch %q", marker)})
+			if res.Success() || res.ExitCode != -1 || res.TimedOut != deadline {
+				t.Fatalf("unexpected canceled result: %+v", res)
+			}
+			if !deadline && !errors.Is(res.Err, context.Canceled) {
+				t.Errorf("Err = %v, want context.Canceled", res.Err)
+			}
+			if _, err := os.Stat(marker); !os.IsNotExist(err) {
+				t.Errorf("canceled command ran: stat error = %v", err)
+			}
+		})
+	}
+}
+
+func TestRunCanceledAfterShellExit(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	timer := time.AfterFunc(200*time.Millisecond, cancel)
+	defer timer.Stop()
+	res := Run(ctx, Spec{Command: "sleep 10 & echo parent-done"})
+	if res.Success() || res.TimedOut || res.ExitCode != 0 || !errors.Is(res.Err, context.Canceled) {
+		t.Fatalf("canceled background command misclassified: %+v", res)
+	}
+	if string(res.Stdout) != "parent-done\n" {
+		t.Fatalf("unexpected shell output: %q", res.Stdout)
 	}
 }
 

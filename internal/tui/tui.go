@@ -81,8 +81,28 @@ type model struct {
 // Run renders the dashboard until the user quits or ctx is canceled. It only
 // reads from the store; it never executes jobs.
 func Run(ctx context.Context, jobs []config.Job, st *store.Store) error {
-	p := tea.NewProgram(newModel(ctx, jobs, st), tea.WithAltScreen(), tea.WithContext(ctx))
-	if _, err := p.Run(); err != nil {
+	if ctx.Err() != nil {
+		return nil
+	}
+	// The CLI owns OS signals and cancels ctx. A second signal handler here
+	// could make one signal count twice (TUI quit plus scheduler force-stop).
+	p := tea.NewProgram(newModel(ctx, jobs, st), tea.WithAltScreen(), tea.WithoutSignalHandler())
+	// WithContext makes Bubble Tea take its hard-kill path, which closes the
+	// cancel reader without waiting for the input goroutine. Request a normal
+	// Quit instead, so signal-driven exits also finish reading before closing.
+	done, watchDone := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(watchDone)
+		select {
+		case <-ctx.Done():
+			p.Quit()
+		case <-done:
+		}
+	}()
+	_, err := p.Run()
+	close(done)
+	<-watchDone // Run also unblocks a pending Quit if terminal setup failed
+	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, tea.ErrProgramKilled) {
 			return nil
 		}

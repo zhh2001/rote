@@ -114,6 +114,11 @@ func (p *cliProcess) wait(t *testing.T, code int) {
 	t.Helper()
 	select {
 	case <-p.done:
+		// Go only runs racefini on os.Exit(0). A forced shutdown's expected
+		// nonzero exit can otherwise conceal a race reported by the child.
+		if strings.Contains(p.output.String(), "WARNING: DATA RACE") {
+			t.Fatalf("child process reported a data race:\n%s", p.output.String())
+		}
 		if got := p.cmd.ProcessState.ExitCode(); got != code {
 			t.Fatalf("exit code = %d, want %d: %v\n%s", got, code, p.err, p.output.String())
 		}

@@ -23,6 +23,15 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+func TestRunAlreadyCanceledDoesNotInitializeTerminal(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	// No store or terminal is needed once shutdown has already been requested.
+	if err := Run(ctx, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func openStore(t *testing.T) *store.Store {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "rote.db"))

@@ -36,7 +36,7 @@ type Result struct {
 	StdoutTruncated bool
 	StderrTruncated bool
 	TimedOut        bool
-	Err             error // start/execution error, distinct from a non-zero exit
+	Err             error // start/execution error or cancellation, distinct from a non-zero exit
 }
 
 // Success reports whether the command ran to completion with a zero exit code.
@@ -88,6 +88,14 @@ func Run(ctx context.Context, spec Spec) Result {
 		return res
 	}
 
+	// Do not launch work (including failure hooks) after forced shutdown.
+	if err := runCtx.Err(); err != nil {
+		res.TimedOut = errors.Is(err, context.DeadlineExceeded)
+		if !res.TimedOut {
+			res.Err = err
+		}
+		return finish()
+	}
 	if err := cmd.Start(); err != nil {
 		res.Err = err
 		return finish()
@@ -99,9 +107,20 @@ func Run(ctx context.Context, spec Spec) Result {
 	// which exec stops watching the context and a lingering descendant could keep
 	// the output pipes open until WaitDelay elapses.
 	done := make(chan struct{})
+	watchDone := make(chan struct{})
+	var interrupted error // written by the watchdog; read after watchDone closes
 	go func() {
+		defer close(watchDone)
 		select {
 		case <-runCtx.Done():
+			// Completion wins if Wait has already returned. Do not signal a
+			// finished process group or retroactively cancel a completed run.
+			select {
+			case <-done:
+				return
+			default:
+			}
+			interrupted = runCtx.Err()
 			_ = terminate(cmd)
 		case <-done:
 		}
@@ -109,22 +128,26 @@ func Run(ctx context.Context, spec Spec) Result {
 
 	waitErr := cmd.Wait()
 	close(done)
+	<-watchDone // no late process-group kill after Run returns
 
 	if cmd.ProcessState != nil {
 		res.ExitCode = cmd.ProcessState.ExitCode()
 	}
-	res.TimedOut = errors.Is(runCtx.Err(), context.DeadlineExceeded)
+	res.TimedOut = errors.Is(interrupted, context.DeadlineExceeded)
 
 	var exitErr *exec.ExitError
 	switch {
+	case errors.Is(interrupted, context.Canceled):
+		// The shell may already have exited with zero while its descendants
+		// still held the output pipes. Cancellation is never a successful run.
+		res.Err = interrupted
+	case res.TimedOut:
+		// Deadlines are reported by TimedOut, separately from cancellation.
 	case waitErr == nil:
 		// Clean exit with code 0.
 	case errors.As(waitErr, &exitErr):
 		// The command ran and exited (non-zero or killed by signal); the exit
 		// code already reflects this, so it is not a runner-level error.
-	case runCtx.Err() != nil:
-		// Abnormal result caused by our own context-driven termination; this is
-		// reported via TimedOut and the exit code, not as a runner error.
 	default:
 		res.Err = waitErr
 	}

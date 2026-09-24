@@ -124,23 +124,26 @@ func runIntegrated(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	engineCtx, cancelEngine := context.WithCancel(context.Background())
+	shutdown := newSchedulerShutdown(context.Background(), eng.ForceStop, nil)
+	defer shutdown.Close()
 	engineDone := make(chan error, 1)
-	go func() { engineDone <- eng.Run(engineCtx) }()
+	go func() { engineDone <- eng.Run(shutdown.ctx) }()
 
-	tuiCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	tuiErr := tui.Run(tuiCtx, jobs, st)
-
-	cancelEngine()
-	<-engineDone
+	tuiErr := tui.Run(shutdown.ctx, jobs, st)
+	shutdown.begin()
+	select {
+	case <-engineDone:
+	default:
+		fmt.Fprintln(stderr, "rote: waiting for running jobs; press Ctrl+C or send SIGTERM to force shutdown")
+		<-engineDone
+	}
+	shutdown.Close()
 
 	if tuiErr != nil {
 		fmt.Fprintf(stderr, "rote: %v\n", tuiErr)
 		return 1
 	}
-	return 0
+	return shutdown.exitCode()
 }
 
 func runStart(args []string, stdout, stderr io.Writer) int {
@@ -159,17 +162,13 @@ func runStart(args []string, stdout, stderr io.Writer) int {
 	}
 	defer st.Close()
 
-	// TODO: a second signal should force-exit; for now one signal triggers a
-	// single graceful shutdown that waits for in-flight runs.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
 	logger := slog.New(slog.NewTextHandler(stderr, nil))
-	if err := cmdStart(ctx, logger, jobs, st); err != nil {
+	code, err := cmdStart(context.Background(), logger, jobs, st)
+	if err != nil {
 		fmt.Fprintf(stderr, "rote: %v\n", err)
 		return 1
 	}
-	return 0
+	return code
 }
 
 func runRun(args []string, stdout, stderr io.Writer) int {

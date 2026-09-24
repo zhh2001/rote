@@ -20,14 +20,25 @@ import (
 // previewLimit caps how many bytes of a stream are echoed in a run summary.
 const previewLimit = 4096
 
-// cmdStart builds the engine and runs it until ctx is canceled.
-func cmdStart(ctx context.Context, logger *slog.Logger, jobs []config.Job, st *store.Store) error {
+// cmdStart runs the engine with two-stage signal handling. Canceling ctx starts
+// graceful shutdown; a subsequent signal forces cancellation of running work.
+func cmdStart(ctx context.Context, logger *slog.Logger, jobs []config.Job, st *store.Store) (int, error) {
 	eng, err := engine.New(jobs, st, logger)
 	if err != nil {
-		return err
+		return 1, err
 	}
+	shutdown := newSchedulerShutdown(ctx, eng.ForceStop, func(forced bool) {
+		if forced {
+			logger.Info("forcing shutdown; canceling running jobs and hooks")
+		} else {
+			logger.Info("stopping scheduler; waiting for running jobs (signal again to force)")
+		}
+	})
+	defer shutdown.Close()
 	logger.Info("starting scheduler", "jobs", len(jobs))
-	return eng.Run(ctx)
+	err = eng.Run(shutdown.ctx)
+	shutdown.Close()
+	return shutdown.exitCode(), err
 }
 
 // Exit codes for cmdRun, mirroring common shell/timeout conventions.

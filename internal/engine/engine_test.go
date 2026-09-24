@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -34,24 +35,26 @@ func openStore(t *testing.T) *store.Store {
 	return st
 }
 
-// runFor runs the engine, lets it work for d, then cancels and waits (bounded)
-// for Run to return.
-func runFor(t *testing.T, e *Engine, d time.Duration) {
+// Wait for observable executions, rather than assuming a fixed sleep allows
+// enough shell launches and database writes on a loaded or race-enabled host.
+func runUntilRecorded(t *testing.T, e *Engine, st *store.Store, job string, count int) {
 	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
-	errc := make(chan error, 1)
-	go func() { errc <- e.Run(ctx) }()
-
-	time.Sleep(d)
-	cancel()
-
-	select {
-	case err := <-errc:
-		if err != nil {
-			t.Fatalf("Run returned error: %v", err)
+	cancel, done := runUntilCleanup(t, e)
+	deadline := time.NewTimer(10 * time.Second)
+	defer deadline.Stop()
+	tick := time.NewTicker(20 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		if len(recent(t, st, job)) >= count {
+			cancel()
+			awaitEngine(t, done)
+			return
 		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("Run did not return within bound after cancel")
+		select {
+		case <-deadline.C:
+			t.Fatalf("job %s did not record %d runs", job, count)
+		case <-tick.C:
+		}
 	}
 }
 
@@ -86,7 +89,7 @@ func TestBasicRun(t *testing.T) {
 	}
 	e := newEngine([]*jobEntry{entry}, st, nil)
 
-	runFor(t, e, 500*time.Millisecond)
+	runUntilRecorded(t, e, st, "tick", 3)
 
 	runs := recent(t, st, "tick")
 	if len(runs) < 3 {
@@ -111,7 +114,7 @@ func TestOverlapSkip(t *testing.T) {
 	}
 	e := newEngine([]*jobEntry{entry}, st, nil)
 
-	runFor(t, e, 900*time.Millisecond)
+	runUntilRecorded(t, e, st, "slow", 2)
 
 	runs := recent(t, st, "slow")
 	if len(runs) < 2 {
@@ -129,31 +132,17 @@ func TestOverlapSkip(t *testing.T) {
 // in-flight run completes and is recorded (not killed).
 func TestGracefulShutdown(t *testing.T) {
 	st := openStore(t)
+	marker := filepath.Join(t.TempDir(), "started")
 	entry := &jobEntry{
-		cfg:   config.Job{Name: "inflight", Command: "sleep 0.4", Timeout: 5 * time.Second},
+		cfg:   config.Job{Name: "inflight", Command: fmt.Sprintf("touch %q; sleep 0.4", marker), Timeout: 5 * time.Second},
 		sched: everySchedule{50 * time.Millisecond},
 	}
 	e := newEngine([]*jobEntry{entry}, st, nil)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	errc := make(chan error, 1)
-	go func() { errc <- e.Run(ctx) }()
-
-	time.Sleep(120 * time.Millisecond) // let a run get in flight
+	cancel, done := runUntilCleanup(t, e)
+	waitMarker(t, marker)
 	cancel()
-
-	start := time.Now()
-	select {
-	case err := <-errc:
-		if err != nil {
-			t.Fatalf("Run returned error: %v", err)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("Run did not return within bound after cancel")
-	}
-	if elapsed := time.Since(start); elapsed > 2*time.Second {
-		t.Errorf("shutdown took %s, want bounded", elapsed)
-	}
+	awaitEngine(t, done)
 
 	runs := recent(t, st, "inflight")
 	if len(runs) < 1 {
@@ -181,7 +170,7 @@ func TestOnFailureHook(t *testing.T) {
 	}
 	e := newEngine([]*jobEntry{entry}, st, nil)
 
-	runFor(t, e, 250*time.Millisecond)
+	runUntilRecorded(t, e, st, "flaky", 1)
 
 	if _, err := os.Stat(marker); err != nil {
 		t.Errorf("on_failure marker not created: %v", err)

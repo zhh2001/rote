@@ -34,10 +34,12 @@ type jobEntry struct {
 
 // Engine runs configured jobs on their schedules and records the outcomes.
 type Engine struct {
-	entries []*jobEntry
-	store   *store.Store
-	logger  *slog.Logger
-	wg      sync.WaitGroup
+	entries  []*jobEntry
+	store    *store.Store
+	logger   *slog.Logger
+	wg       sync.WaitGroup
+	runCtx   context.Context
+	stopRuns context.CancelFunc
 }
 
 // New builds an Engine, parsing each job's schedule up front; a parse failure
@@ -60,7 +62,15 @@ func newEngine(entries []*jobEntry, st *store.Store, logger *slog.Logger) *Engin
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
-	return &Engine{entries: entries, store: st, logger: logger}
+	runCtx, stopRuns := context.WithCancel(context.Background())
+	return &Engine{entries: entries, store: st, logger: logger, runCtx: runCtx, stopRuns: stopRuns}
+}
+
+// ForceStop stops scheduling and cancels running jobs and failure hooks. It is
+// safe to call concurrently, repeatedly, or before Run. Run still waits for
+// process cleanup and result persistence before returning.
+func (e *Engine) ForceStop() {
+	e.stopRuns()
 }
 
 // Run starts one scheduling goroutine per job and blocks until ctx is canceled.
@@ -69,9 +79,10 @@ func newEngine(entries []*jobEntry, st *store.Store, logger *slog.Logger) *Engin
 //
 // In-flight runs are deliberately NOT canceled by shutdown: each is bounded only
 // by its own Timeout. A job with Timeout == 0 whose command never exits will
-// therefore hold up shutdown indefinitely; set a Timeout to avoid this. A forced
-// second-stage exit is left to the caller.
+// therefore hold up graceful shutdown indefinitely. Call ForceStop to cancel
+// those runs. An Engine is single-use: Run must only be called once.
 func (e *Engine) Run(ctx context.Context) error {
+	defer e.stopRuns()
 	for _, j := range e.entries {
 		e.wg.Add(1)
 		go e.schedule(ctx, j)
@@ -87,6 +98,9 @@ func (e *Engine) Run(ctx context.Context) error {
 func (e *Engine) schedule(ctx context.Context, j *jobEntry) {
 	defer e.wg.Done()
 	for {
+		if ctx.Err() != nil || e.runCtx.Err() != nil {
+			return
+		}
 		next := j.sched.Next(time.Now())
 		if next.IsZero() {
 			e.logger.Info("job has no further runs; stopping schedule", "job", j.cfg.Name)
@@ -98,7 +112,15 @@ func (e *Engine) schedule(ctx context.Context, j *jobEntry) {
 		case <-ctx.Done():
 			timer.Stop()
 			return
+		case <-e.runCtx.Done():
+			timer.Stop()
+			return
 		case <-timer.C:
+		}
+		// A ready timer and shutdown can arrive together; shutdown must not
+		// dispatch another run merely because select chose the timer.
+		if ctx.Err() != nil || e.runCtx.Err() != nil {
+			return
 		}
 
 		// Overlap policy: skip if the previous run is still in flight. The
@@ -120,9 +142,8 @@ func (e *Engine) schedule(ctx context.Context, j *jobEntry) {
 
 // execute runs the command, records the result, and fires the failure hook.
 func (e *Engine) execute(j *jobEntry) {
-	// A detached background context: the run is bounded only by its own Timeout,
-	// so shutting the engine down does not kill a run already in flight.
-	res := runner.Run(context.Background(), runner.Spec{
+	// Independent of graceful shutdown, but canceled by ForceStop.
+	res := runner.Run(e.runCtx, runner.Spec{
 		Name:    j.cfg.Name,
 		Command: j.cfg.Command,
 		Timeout: j.cfg.Timeout,
@@ -146,7 +167,7 @@ func (e *Engine) execute(j *jobEntry) {
 		e.logger.Error("failed to record run", "job", j.cfg.Name, "err", err)
 	}
 
-	if !res.Success() && j.cfg.OnFailure != "" {
+	if !res.Success() && j.cfg.OnFailure != "" && e.runCtx.Err() == nil {
 		e.runHook(j)
 	}
 }
@@ -154,7 +175,7 @@ func (e *Engine) execute(j *jobEntry) {
 // runHook makes a best-effort attempt to run the job's on_failure command. Its
 // outcome is logged but never recorded in the store.
 func (e *Engine) runHook(j *jobEntry) {
-	res := runner.Run(context.Background(), runner.Spec{
+	res := runner.Run(e.runCtx, runner.Spec{
 		Name:    j.cfg.Name + ":on_failure",
 		Command: j.cfg.OnFailure,
 		Timeout: hookTimeout,

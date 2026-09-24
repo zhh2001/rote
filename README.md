@@ -134,6 +134,8 @@ rounded up.
 
 The recorded and displayed exit code belongs to the shell process. If the shell exits successfully but output capture fails, the run is marked failed and `rote run` exits with `126`; the recorded shell exit code remains `0`.
 
+Canceling a manual run with Ctrl+C or SIGTERM terminates its process group, records `context canceled` as a failure (not a timeout), and exits with `126`, including when the shell already exited but a descendant still held its output pipes open.
+
 In the dashboard: `↑`/`↓` (or `k`/`j`) to move, `Enter` to open a job's history,
 `Tab` to switch between the history list and the output pane, `Esc` to go back,
 `r` to refresh, `?` for help, `q` to quit.
@@ -162,6 +164,14 @@ systemctl --user enable --now rote.service
 ```
 
 Watch it live from another terminal with `rote tui`.
+
+### Stopping the scheduler
+
+The first Ctrl+C or SIGTERM stops scheduling new jobs and waits for running jobs and their failure hooks to finish. Quitting the integrated dashboard with `q` also starts this graceful shutdown. The database lock stays held until the work is finished and its results have been recorded.
+
+If a job is stuck, press Ctrl+C again or send another SIGTERM. After quitting the dashboard, one such signal is enough. This cancels running jobs and hooks by terminating their process groups, records canceled jobs as failures rather than timeouts, and skips new failure hooks. An already-failed job keeps its original result if only its hook was canceled. The scheduler then closes the database, releases its lock, and exits with `130` for SIGINT or `143` for SIGTERM.
+
+Ordinary graceful shutdown returns `0`. A job with no timeout can keep graceful shutdown waiting indefinitely; configure `timeout` or use the second signal to cancel it. Forced shutdown still waits for process cleanup and database writes; it does not bypass them with an immediate process exit.
 
 ## Caveats
 
