@@ -209,6 +209,28 @@ func TestTickRefresh(t *testing.T) {
 	}
 }
 
+func TestListLatestOrderingAfterRefresh(t *testing.T) {
+	st := openStore(t)
+	now := time.Now()
+	insertRun(t, st, "alpha", now, false, 1, time.Second, "first")
+	m := newModel(context.Background(), twoJobs(), st)
+	wantID := insertRun(t, st, "alpha", now, true, 0, time.Second, "tie-winner")
+	// A late-finishing older run must not replace the newer start, even though
+	// its ID is greater. Same-start ties still use the greater ID.
+	insertRun(t, st, "alpha", now.Add(-time.Minute), false, 2, time.Second, "older")
+	m = update(m, tickMsg(now.Add(time.Second)))
+	if m.loadErr != nil || m.latest["alpha"].ID != wantID {
+		t.Fatalf("wrong latest metadata: %+v, err=%v", m.latest, m.loadErr)
+	}
+	if row, _ := findRow(m.listTbl.Rows(), "alpha"); !strings.Contains(row[3], "✓") {
+		t.Errorf("wrong latest status: %v", row)
+	}
+	m = update(m, keyType(tea.KeyEnter))
+	if m.outputID != wantID || string(m.output.Stdout) != "tie-winner" {
+		t.Errorf("detail disagrees with list: id=%d output=%q", m.outputID, m.output.Stdout)
+	}
+}
+
 // 5. Selecting a history row loads that run's output; changing rows changes it.
 func TestOutputFollowsSelection(t *testing.T) {
 	st := openStore(t)

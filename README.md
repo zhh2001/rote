@@ -151,6 +151,8 @@ rounded up.
 | `rote logs <job> [-n N] [-o]` | Recent runs for a job; `-n` limits the count, `-o` includes the last run's output.                                                                                                 |
 | `rote version`                | Print the version.                                                                                                                                                                 |
 
+Lists and history tables read metadata only; `logs -o` loads captured output only for the newest displayed run. If that run is concurrently removed by history retention, it reports the output as unavailable instead of displaying another run's output.
+
 The recorded and displayed exit code belongs to the shell process. If the shell exits successfully but output capture fails, the run is marked failed and `rote run` exits with `126`; the recorded shell exit code remains `0`.
 
 Canceling a manual run with Ctrl+C or SIGTERM terminates its process group, records `context canceled` as a failure (not a timeout), and exits with `126`, including when the shell already exited but a descendant still held its output pipes open.

@@ -102,7 +102,7 @@ func cmdList(ctx context.Context, w io.Writer, jobs []config.Job, st *store.Stor
 		}
 
 		last := "-"
-		lr, ok, err := st.LastRun(ctx, j.Name)
+		lr, ok, err := st.LastRunMeta(ctx, j.Name)
 		if err != nil {
 			return fmt.Errorf("job %q: %w", j.Name, err)
 		}
@@ -121,7 +121,7 @@ func cmdLogs(ctx context.Context, w io.Writer, st *store.Store, jobName string, 
 	if n <= 0 {
 		n = 20
 	}
-	runs, err := st.RecentRuns(ctx, jobName, n)
+	runs, err := st.RecentRunsMeta(ctx, jobName, n)
 	if err != nil {
 		return err
 	}
@@ -137,12 +137,25 @@ func cmdLogs(ctx context.Context, w io.Writer, st *store.Store, jobName string, 
 			r.StartedAt.Local().Format("2006-01-02 15:04:05"),
 			statusSymbol(r.Success), r.ExitCode, shortDur(r.Duration))
 	}
-	tw.Flush()
+	if err := tw.Flush(); err != nil {
+		return err
+	}
 
 	if showOutput {
-		latest := runs[0] // RecentRuns is newest-first.
-		writeStream(w, "last stdout", latest.Stdout, latest.StdoutTruncated)
-		writeStream(w, "last stderr", latest.Stderr, latest.StderrTruncated)
+		// Load only the displayed newest run's output, never a newer run that
+		// might have arrived since the metadata query.
+		output, ok, err := st.RunOutput(ctx, runs[0].ID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			// Retention can remove this run between the two reads. Do not
+			// misrepresent missing output as an empty stream or another run.
+			_, err := fmt.Fprintf(w, "last run output unavailable (run %d no longer exists)\n", runs[0].ID)
+			return err
+		}
+		writeStream(w, "last stdout", output.Stdout, output.StdoutTruncated)
+		writeStream(w, "last stderr", output.Stderr, output.StderrTruncated)
 	}
 	return nil
 }

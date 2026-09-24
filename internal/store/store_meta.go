@@ -40,13 +40,8 @@ const metaColumns = `id, job_name, started_at, finished_at, duration, exit_code,
 func (s *Store) LatestMetaPerJob(ctx context.Context) (map[string]RunMeta, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT `+metaColumns+`
-FROM (
-    SELECT *, ROW_NUMBER() OVER (
-        PARTITION BY job_name ORDER BY started_at DESC, id DESC
-    ) AS rn
-    FROM runs
-)
-WHERE rn = 1`)
+FROM runs
+WHERE id IN (`+latestRunIDs+`)`)
 	if err != nil {
 		return nil, fmt.Errorf("store: latest meta per job: %w", err)
 	}
@@ -64,6 +59,25 @@ WHERE rn = 1`)
 		return nil, fmt.Errorf("store: latest meta per job: %w", err)
 	}
 	return out, nil
+}
+
+// LastRunMeta returns the most recent run's metadata for jobName without
+// loading captured output. ok is false when the job has no recorded runs.
+func (s *Store) LastRunMeta(ctx context.Context, jobName string) (RunMeta, bool, error) {
+	row := s.db.QueryRowContext(ctx, `
+SELECT `+metaColumns+`
+FROM runs
+WHERE job_name = ?
+ORDER BY started_at DESC, id DESC
+LIMIT 1`, jobName)
+	m, err := scanRunMeta(row)
+	if err == sql.ErrNoRows {
+		return RunMeta{}, false, nil
+	}
+	if err != nil {
+		return RunMeta{}, false, fmt.Errorf("store: last run meta: %w", err)
+	}
+	return m, true, nil
 }
 
 // RecentRunsMeta returns up to limit runs' metadata for jobName, newest first.

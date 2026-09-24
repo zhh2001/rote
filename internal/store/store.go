@@ -229,17 +229,26 @@ LIMIT 1`, jobName)
 	return r, true, nil
 }
 
+// latestRunIDs enumerates job names using the covering job/start index, then
+// seeks to each job's newest ID using that same index (including the rowid tie
+// breaker). Only those rows' payloads are read by the outer query. A window
+// query over SELECT * instead sorts/copies every historical row and its blobs.
+// Discovering job names still scans the index, but not the historical payloads.
+const latestRunIDs = `
+SELECT (
+    SELECT latest.id FROM runs AS latest
+    WHERE latest.job_name = jobs.job_name
+    ORDER BY latest.started_at DESC, latest.id DESC
+    LIMIT 1
+)
+FROM (SELECT DISTINCT job_name FROM runs) AS jobs`
+
 // LatestPerJob returns the most recent run for every job, keyed by job name.
 func (s *Store) LatestPerJob(ctx context.Context) (map[string]Run, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT `+runColumns+`
-FROM (
-    SELECT *, ROW_NUMBER() OVER (
-        PARTITION BY job_name ORDER BY started_at DESC, id DESC
-    ) AS rn
-    FROM runs
-)
-WHERE rn = 1`)
+FROM runs
+WHERE id IN (`+latestRunIDs+`)`)
 	if err != nil {
 		return nil, fmt.Errorf("store: latest per job: %w", err)
 	}
