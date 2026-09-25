@@ -41,7 +41,7 @@ jobs:
       - name: Upload coverage to Codecov
         # Report one consistent baseline; all four platforms still run tests.
         if: matrix.os == 'ubuntu-24.04'
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           files: coverage.out
         env:
