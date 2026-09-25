@@ -146,6 +146,8 @@ Canceling a manual run with Ctrl+C or SIGTERM terminates its process group, reco
 
 In the dashboard: `↑`/`↓` (or `k`/`j`) to move, `Enter` to open a job's history, `Tab` to switch between the history list and the output pane, `Esc` to go back, `r` to refresh, `?` for help, `q` to quit.
 
+The dashboard retries failed reads on its next one-second refresh or when you press `r`. List/history errors appear alongside the last successfully loaded data, if any; output errors appear in the output pane. Each error clears when its read succeeds. Successfully loaded output is cached for the selected run.
+
 ## Running as a service
 
 A minimal systemd user unit:

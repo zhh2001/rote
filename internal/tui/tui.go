@@ -75,6 +75,8 @@ type model struct {
 	help help.Model
 	keys keyMap
 
+	// Metadata error for the active view. Output errors belong to the viewport
+	// so one successful read cannot hide a failure in the other pane.
 	loadErr error
 }
 
@@ -191,6 +193,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // refresh re-reads the store for whichever view is active.
 func (m *model) refresh() {
+	defer m.layout() // reserve or release the metadata error banner's row
 	if m.mode == listView {
 		m.refreshLatest()
 		m.rebuildListRows()
@@ -230,6 +233,9 @@ func (m model) handleListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.focus = focusHistory
 		m.listTbl.Blur()
 		m.histTbl.Focus()
+		// A failed query for this job must not display the previous job's data.
+		m.history = nil
+		m.histTbl.SetRows(nil)
 		m.histTbl.SetCursor(0)
 		m.outputID = 0
 		m.loadHistory()
@@ -249,7 +255,7 @@ func (m model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = listView
 		m.histTbl.Blur()
 		m.listTbl.Focus()
-		m.layout()
+		m.refresh()
 		return m, nil
 	case key.Matches(msg, m.keys.Tab):
 		if m.focus == focusHistory {
@@ -279,8 +285,8 @@ func (m model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m *model) refreshLatest() {
 	latest, err := m.store.LatestMetaPerJob(m.ctx)
+	m.loadErr = err
 	if err != nil {
-		m.loadErr = err
 		return
 	}
 	m.latest = latest
@@ -307,8 +313,8 @@ func (m *model) loadHistory() {
 		return
 	}
 	runs, err := m.store.RecentRunsMeta(m.ctx, m.jobs[m.jobIdx].Name, historyLimit)
+	m.loadErr = err
 	if err != nil {
-		m.loadErr = err
 		return
 	}
 	m.history = runs
@@ -326,8 +332,8 @@ func (m *model) loadHistory() {
 	m.histTbl.SetCursor(cur)
 }
 
-// refreshOutput loads the selected run's output, but only when the selection
-// has changed since the last load.
+// refreshOutput caches successful reads of immutable run output. Failed or
+// missing reads are retried on refresh even if the selection has not changed.
 func (m *model) refreshOutput() {
 	if len(m.history) == 0 {
 		m.outputID = 0
@@ -338,27 +344,26 @@ func (m *model) refreshOutput() {
 	}
 	idx := clamp(m.histTbl.Cursor(), 0, len(m.history)-1)
 	id := m.history[idx].ID
-	if id == m.outputID {
+	if id == m.outputID && m.outputOK {
 		return
 	}
 
 	out, ok, err := m.store.RunOutput(m.ctx, id)
 	m.outputID = id
+	m.output = store.Output{}
+	m.outputOK = false
+	m.vp.GotoTop()
 	if err != nil {
-		m.loadErr = err
-		m.outputOK = false
 		m.vp.SetContent("error loading output: " + err.Error())
 		return
 	}
 	m.outputOK = ok
 	if !ok {
-		m.output = store.Output{}
-		m.vp.SetContent("(no output)")
+		m.vp.SetContent("(output unavailable: run no longer exists)")
 		return
 	}
 	m.output = out
 	m.vp.SetContent(renderOutput(out))
-	m.vp.GotoTop()
 }
 
 func (m *model) layout() {
@@ -369,7 +374,10 @@ func (m *model) layout() {
 	if m.help.ShowAll {
 		footerH = 3
 	}
-	const headerH = 1
+	headerH := 1
+	if m.loadErr != nil {
+		headerH++
+	}
 
 	listH := m.height - headerH - footerH - 1
 	if listH < 1 {
@@ -407,6 +415,12 @@ func (m model) View() string {
 	} else {
 		body = m.detailView()
 	}
+	if m.loadErr != nil {
+		// Keep the error on one row, including at narrow terminal sizes. The
+		// last successful data stays visible until the next successful refresh.
+		banner := dimStyle.MaxWidth(m.width).MaxHeight(1).Render("error loading data: " + m.loadErr.Error())
+		body = lipgloss.JoinVertical(lipgloss.Left, banner, body)
+	}
 	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
 }
 
@@ -422,6 +436,9 @@ func (m model) detailView() string {
 	}
 	title := subtitleStyle.Render("job: " + name)
 	if len(m.history) == 0 {
+		if m.loadErr != nil {
+			return title
+		}
 		return lipgloss.JoinVertical(lipgloss.Left, title, dimStyle.Render("no runs yet"))
 	}
 	return lipgloss.JoinVertical(lipgloss.Left,
