@@ -6,6 +6,7 @@ Publishing is triggered by pushing a `v*` tag. Never move a published tag or rep
 
 - Commit the intended changes, including `docs/releases/<tag>.md`.
 - Check formatting, `go vet ./...`, `go test -race -count=1 ./...`, and `go mod tidy -diff`. Review any flaky/time-sensitive test failures rather than silently retrying until green.
+- The full Go suite includes offline installer tests in `./tests`, on both `sh` and `bash`. They cover curl/wget and SHA-256 tool selection, failed downloads/tools, malformed/duplicate/mismatched checksums, and preservation of existing installations. These tests also run in the four-platform source CI; no network access or sudo is needed.
 - Run `goreleaser check` and `goreleaser release --snapshot --parallelism 2`. This builds all archives/packages in `dist/` without publishing. Do not use `--clean` on a directory containing files you need to keep.
 - Extract the host archive, verify its checksum, and exercise its binary with:
 

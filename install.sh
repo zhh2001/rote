@@ -15,7 +15,6 @@ BINARY="rote"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 
 info() { printf '%s\n' "rote-install: $*"; }
-warn() { printf '%s\n' "rote-install: warning: $*" >&2; }
 err() {
 	printf '%s\n' "rote-install: error: $*" >&2
 	exit 1
@@ -32,15 +31,17 @@ download() {
 	fi
 }
 
-# sha256 <file> prints the file's SHA-256, or returns non-zero if no tool exists.
+# Preserve the hash tool's exit status: a pipeline to awk would hide failures.
+# sha256 <file> prints the file's SHA-256, or returns non-zero on failure.
 sha256() {
 	if command -v sha256sum >/dev/null 2>&1; then
-		sha256sum "$1" | awk '{print $1}'
+		checksum="$(sha256sum "$1")" || return 1
 	elif command -v shasum >/dev/null 2>&1; then
-		shasum -a 256 "$1" | awk '{print $1}'
+		checksum="$(shasum -a 256 "$1")" || return 1
 	else
 		return 1
 	fi
+	printf '%s\n' "${checksum%% *}"
 }
 
 # Detect the OS. uname -s ("Linux"/"Darwin") already matches the goreleaser
@@ -58,6 +59,10 @@ x86_64 | amd64) arch="x86_64" ;;
 aarch64 | arm64) arch="arm64" ;;
 *) err "unsupported architecture: $machine" ;;
 esac
+
+if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
+	err "need sha256sum or shasum to verify downloads; refusing to install without verification"
+fi
 
 # Build the release download base URL. Archive names carry no version, so the
 # tag is not needed up front: without ROTE_VERSION we use GitHub's
@@ -82,20 +87,26 @@ info "downloading ${asset}..."
 download "${base_url}/${asset}" "${tmp}/${asset}" ||
 	err "failed to download ${asset} from ${base_url}"
 
-# Verify the checksum when a SHA-256 tool is available.
+# Verification is mandatory and must finish before extraction or installation.
 info "downloading checksums.txt..."
-if download "${base_url}/checksums.txt" "${tmp}/checksums.txt"; then
-	if actual="$(sha256 "${tmp}/${asset}")"; then
-		expected="$(awk -v f="$asset" '$2 == f {print $1}' "${tmp}/checksums.txt")"
-		[ -n "$expected" ] || err "no checksum listed for ${asset}"
-		[ "$actual" = "$expected" ] || err "checksum mismatch for ${asset}"
-		info "checksum verified"
-	else
-		warn "no sha256 tool found (sha256sum/shasum); skipping verification"
-	fi
-else
-	warn "could not download checksums.txt; skipping verification"
-fi
+download "${base_url}/checksums.txt" "${tmp}/checksums.txt" ||
+	err "failed to download checksums.txt from ${base_url}; refusing to install without verification"
+expected="$(awk -v f="$asset" '
+	{ sub(/\r$/, "") }
+	$2 == f {
+		matches++
+		if (NF != 2 || length($1) != 64 || $1 ~ /[^0-9a-fA-F]/) invalid = 1
+		hash = tolower($1)
+	}
+	END {
+		if (matches != 1 || invalid) exit 1
+		print hash
+	}
+' "${tmp}/checksums.txt")" ||
+	err "checksums.txt must contain exactly one valid SHA-256 for ${asset}"
+actual="$(sha256 "${tmp}/${asset}")" || err "failed to calculate SHA-256 for ${asset}"
+[ "$actual" = "$expected" ] || err "checksum mismatch for ${asset}"
+info "checksum verified"
 
 info "extracting..."
 tar -xzf "${tmp}/${asset}" -C "$tmp"

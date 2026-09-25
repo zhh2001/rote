@@ -21,6 +21,8 @@ Install script (Linux and macOS) — downloads the right binary for your platfor
 curl -fsSL https://raw.githubusercontent.com/zhh2001/rote/main/install.sh | sh
 ```
 
+The installer requires `curl` or `wget` and `sha256sum` or `shasum`. SHA-256 verification is mandatory: missing tools, failed checksum downloads/calculations, invalid checksum entries, or checksum mismatches stop installation before extracting the archive or replacing an existing binary.
+
 With Go:
 
 ```sh
