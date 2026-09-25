@@ -19,24 +19,34 @@ Publishing is triggered by pushing a `v*` tag. Never move a published tag or rep
 - Ensure `HOMEBREW_TAP_GITHUB_TOKEN` is configured as a repository Actions secret with write access to `zhh2001/homebrew-tap`. Never put its value in the repo or release notes. The default Actions token publishes the GitHub release.
 - Push main and wait for all four native Linux/macOS × amd64/arm64 CI jobs on that exact commit to succeed. Cross-compiling on one host does not check platform-specific runtime behavior. Confirm the proposed tag is unused.
 
-## Publish v1.0.0 (maintainer action)
+## Publish v1.0.1 (maintainer action)
+
+The v1.0.0 source tag remains unchanged. Its macOS source-test gate failed before publishing any binary assets. The corrected tests and four-platform main/PR CI are included in v1.0.1; do not rerun the old release or move the v1.0.0 tag.
 
 Review the prepared, staged changes, then commit and push:
 
 ```sh
 git diff --cached --stat
-git commit -m "chore: prepare v1.0.0 release and post-release verification"
+git commit -m "docs: prepare v1.0.1 release"
 git push origin main
 gh run list --workflow ci.yml --commit "$(git rev-parse HEAD)" --limit 1
 gh run watch <ci-run-id> --exit-status
 ```
 
-Replace `<ci-run-id>` with the ID printed by `gh run list`. If the run has not appeared yet, repeat the list command after a few seconds. Only after CI on that exact commit succeeds, and after confirming `v1.0.0` does not already exist:
+Replace `<ci-run-id>` with the ID printed by `gh run list`. If the run has not appeared yet, repeat the list command after a few seconds. Wait for all four jobs on that exact commit, including after these documentation changes. Then check that the release notes exist and the new tag is unused locally and remotely:
 
 ```sh
-git tag -a v1.0.0 -m "Release v1.0.0"
-git push origin refs/tags/v1.0.0
-gh run list --workflow release.yml --branch v1.0.0 --limit 1
+test -f docs/releases/v1.0.1.md
+git tag --list v1.0.1
+git ls-remote --tags origin refs/tags/v1.0.1
+```
+
+Both tag queries must succeed without printing a matching tag. If either finds one, stop and inspect its commit/release state instead of overwriting it. With a clean working tree on the tested main commit, publish:
+
+```sh
+git tag -a v1.0.1 -m "Release v1.0.1"
+git push origin refs/tags/v1.0.1
+gh run list --workflow release.yml --branch v1.0.1 --limit 1
 gh run watch <release-run-id> --exit-status
 ```
 
@@ -57,7 +67,7 @@ Wait for **all** jobs, not only the GoReleaser publishing job. Post-publication 
 To rerun verification without publishing or changing the tag:
 
 ```sh
-gh workflow run verify-release.yml -f tag=v1.0.0
+gh workflow run verify-release.yml -f tag=v1.0.1
 gh run list --workflow verify-release.yml --limit 5
 gh run watch <verification-run-id> --exit-status
 ```

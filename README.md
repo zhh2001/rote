@@ -36,9 +36,9 @@ brew install --cask zhh2001/tap/rote
 Linux packages — download the `.deb`/`.rpm`/`.apk` for your architecture from the [Releases](https://github.com/zhh2001/rote/releases) page, then:
 
 ```sh
-sudo dpkg -i rote_*.deb          # Debian/Ubuntu
-sudo rpm -i rote_*.rpm           # Fedora/RHEL/openSUSE
-apk add --allow-untrusted rote_*.apk   # Alpine
+sudo dpkg -i rote_*.deb               # Debian/Ubuntu
+sudo rpm -i rote_*.rpm                # Fedora/RHEL/openSUSE
+apk add --allow-untrusted rote_*.apk  # Alpine
 ```
 
 Or grab a prebuilt binary archive from the same Releases page.
@@ -47,14 +47,13 @@ Or grab a prebuilt binary archive from the same Releases page.
 
 Starting with v1.0.0, the documented CLI commands/flags, configuration fields, exit-code meanings, and the ability to read existing run history are the stable user-facing interface. Compatible additions and fixes stay within 1.x; incompatible changes to that interface require a new major version. Terminal layout and human-readable table formatting are not machine-readable APIs, and the raw SQLite schema is an implementation detail, not a supported SQL API.
 
-When upgrading, stop schedulers and manual runs, allow graceful shutdown to finish, and back up your configuration and database before replacing the binary. v1.0.0 uses the same database schema as v0.2.1 and leaves history unlimited unless you explicitly configure `history_limit`. See the [v1.0.0 release notes](docs/releases/v1.0.0.md) for behavior changes and rollback cautions. Release maintainers can follow the [release checklist](docs/RELEASING.md).
+When upgrading, stop schedulers and manual runs, allow graceful shutdown to finish, and back up your configuration and database before replacing the binary. v1.0.1 uses the same database schema as v0.2.1 and leaves history unlimited unless you explicitly configure `history_limit`. See the [v1.0.1 release notes](docs/releases/v1.0.1.md) for behavior changes and rollback cautions. Release maintainers can follow the [release checklist](docs/RELEASING.md).
+
+The v1.0.0 source tag is retained, but its release workflow stopped before publishing binary assets. v1.0.1 is the replacement release target; the existing tag is not moved or reused.
 
 ## Quick start
 
-Run `rote init` to create a starter config and print its location, then edit it.
-The default is `~/.config/rote/jobs.toml` on Linux (or under `$XDG_CONFIG_HOME`
-when set), and `~/Library/Application Support/rote/jobs.toml` on macOS.
-For example:
+Run `rote init` to create a starter config and print its location, then edit it. The default is `~/.config/rote/jobs.toml` on Linux (or under `$XDG_CONFIG_HOME` when set), and `~/Library/Application Support/rote/jobs.toml` on macOS. For example:
 
 ```toml
 [[job]]
@@ -150,7 +149,7 @@ Quote paths containing spaces, for example `rote list -c "$HOME/Library/Applicat
 | `rote list`                   | List jobs with their next and last run.                                                                                                                                            |
 | `rote logs <job> [-n N] [-o]` | Recent runs for a job; `-n` limits the count, `-o` includes the last run's output.                                                                                                 |
 | `rote version`                | Print the version.                                                                                                                                                                 |
-| `rote init`                   | Create a starter config at the platform's default location (or `-c` path), without overwriting an existing file. |
+| `rote init`                   | Create a starter config at the platform's default location (or `-c` path), without overwriting an existing file.                                                                   |
 
 Lists and history tables read metadata only; `logs -o` loads captured output only for the newest displayed run. If that run is concurrently removed by history retention, it reports the output as unavailable instead of displaying another run's output.
 
