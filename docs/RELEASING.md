@@ -17,7 +17,7 @@ Publishing is triggered by pushing a `v*` tag. Never move a published tag or rep
 
   `ROTE_TEST_BINARY` redirects the process tests to that executable; unit tests still run against source. Release binaries themselves are not race-instrumented. Set `ROTE_TEST_PREVIOUS_BINARY` to an extracted, checksum-verified v0.2.1 binary to include the old-database upgrade test.
 - Ensure `HOMEBREW_TAP_GITHUB_TOKEN` is configured as a repository Actions secret with write access to `zhh2001/homebrew-tap`. Never put its value in the repo or release notes. The default Actions token publishes the GitHub release.
-- Push main and wait for its CI to succeed. Confirm the proposed tag is unused.
+- Push main and wait for all four native Linux/macOS × amd64/arm64 CI jobs on that exact commit to succeed. Cross-compiling on one host does not check platform-specific runtime behavior. Confirm the proposed tag is unused.
 
 ## Publish v1.0.0 (maintainer action)
 
@@ -43,6 +43,12 @@ gh run watch <release-run-id> --exit-status
 Use the ID for this tag's release run, not an older run. A failed post-publication check can leave an already-published release; inspect the failure before retrying.
 
 The release workflow runs native Linux/macOS × amd64/arm64 race-enabled source tests, publishes through GoReleaser, updates the Homebrew cask, then calls `verify-release.yml`. No local GitHub token export is required for the CI release.
+
+## If the release gate fails
+
+Check which jobs ran before retrying. A failed source-test gate skips publishing; a failed post-publication check may leave an already-public release. Inspect the release and its assets rather than inferring publication from the tag alone.
+
+Re-running an old workflow uses its original commit, not a newer main commit. Commit any test/code fixes, push main, and wait for all four native CI jobs first. Keep pushed tags immutable: if a different commit is needed for release, choose a new version and add matching release notes. Do not delete or force-move the old tag as an automatic recovery step.
 
 ## After publication
 

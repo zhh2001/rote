@@ -51,7 +51,10 @@ When upgrading, stop schedulers and manual runs, allow graceful shutdown to fini
 
 ## Quick start
 
-Drop a config at `~/.config/rote/jobs.toml`:
+Run `rote init` to create a starter config and print its location, then edit it.
+The default is `~/.config/rote/jobs.toml` on Linux (or under `$XDG_CONFIG_HOME`
+when set), and `~/Library/Application Support/rote/jobs.toml` on macOS.
+For example:
 
 ```toml
 [[job]]
@@ -129,8 +132,12 @@ The smallest effective interval is about **1 second** — sub-second schedules a
 
 ### Files
 
-- **Config**: your user config dir, i.e. `~/.config/rote/jobs.toml` (override with `-c`/`--config`).
-- **Database**: your XDG state dir, i.e. `~/.local/state/rote/rote.db` (override with `--db`).
+- **Config (Linux)**: `$XDG_CONFIG_HOME/rote/jobs.toml` when set, otherwise `~/.config/rote/jobs.toml`.
+- **Config (macOS)**: `~/Library/Application Support/rote/jobs.toml`; `XDG_CONFIG_HOME` does not affect this path.
+- **Database (Linux and macOS)**: `$XDG_STATE_HOME/rote/rote.db` when set, otherwise `~/.local/state/rote/rote.db`.
+
+Override the config path with `-c`/`--config` and the database path with `--db`.
+Quote paths containing spaces, for example `rote list -c "$HOME/Library/Application Support/rote/jobs.toml"`.
 
 ## Commands
 
@@ -143,6 +150,7 @@ The smallest effective interval is about **1 second** — sub-second schedules a
 | `rote list`                   | List jobs with their next and last run.                                                                                                                                            |
 | `rote logs <job> [-n N] [-o]` | Recent runs for a job; `-n` limits the count, `-o` includes the last run's output.                                                                                                 |
 | `rote version`                | Print the version.                                                                                                                                                                 |
+| `rote init`                   | Create a starter config at the platform's default location (or `-c` path), without overwriting an existing file. |
 
 Lists and history tables read metadata only; `logs -o` loads captured output only for the newest displayed run. If that run is concurrently removed by history retention, it reports the output as unavailable instead of displaying another run's output.
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -42,18 +43,23 @@ func TestDispatchFlagsRouteToDefault(t *testing.T) {
 // No arguments still routes to the default command.
 func TestDispatchNoArgsDefault(t *testing.T) {
 	// Point the default config/db at empty temp dirs so it fails fast (no TTY).
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	cfgDir := isolateConfigDir(t, true)
+	stateDir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateDir)
 
 	code, _, stderr := runDispatch(nil)
 	if strings.Contains(stderr, "unknown command") {
 		t.Errorf("no args routed to unknown command:\n%s", stderr)
 	}
-	if code == 0 {
-		t.Errorf("code = 0, want non-zero (missing default config)")
+	if code != 1 {
+		t.Errorf("code = %d, want 1 (missing default config)", code)
 	}
-	if !strings.Contains(stderr, "config") {
-		t.Errorf("stderr should mention the config error:\n%s", stderr)
+	missing := filepath.Join(cfgDir, "rote", "jobs.toml")
+	if !strings.Contains(stderr, missing) || !strings.Contains(stderr, "rote init") {
+		t.Errorf("stderr should name the isolated missing config and init hint:\n%s", stderr)
+	}
+	if _, err := os.Stat(filepath.Join(stateDir, "rote")); !os.IsNotExist(err) {
+		t.Errorf("missing config should not create database state: %v", err)
 	}
 }
 

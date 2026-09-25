@@ -1,9 +1,39 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
+
+// isolateConfigDir redirects both supported OS config roots to temporary
+// directories. Setting XDG_CONFIG_HOME alone does not isolate macOS tests.
+// Return the platform's expected directory without calling the resolver under
+// test (or os.UserConfigDir), so a wrong platform choice cannot validate itself.
+func isolateConfigDir(t *testing.T, useXDG bool) string {
+	t.Helper()
+	testHome := t.TempDir()
+	t.Setenv("HOME", testHome)
+	xdgConfig := ""
+	if useXDG {
+		xdgConfig = t.TempDir()
+	}
+	t.Setenv("XDG_CONFIG_HOME", xdgConfig)
+	switch runtime.GOOS {
+	case "darwin":
+		return filepath.Join(testHome, "Library", "Application Support")
+	case "linux":
+		if useXDG {
+			return xdgConfig
+		}
+		return filepath.Join(testHome, ".config")
+	default:
+		t.Fatalf("unsupported test platform: %s", runtime.GOOS)
+		return ""
+	}
+}
 
 func TestConfigPath(t *testing.T) {
 	base := filepath.Join("/home", "u", ".config")
@@ -49,19 +79,70 @@ func TestResolveDBPathEnv(t *testing.T) {
 	}
 }
 
-// resolveConfigPath uses the OS config dir (driven by XDG_CONFIG_HOME on Linux).
+// Linux honors XDG_CONFIG_HOME, falling back to ~/.config. macOS always uses
+// ~/Library/Application Support, even when XDG_CONFIG_HOME is set.
 func TestResolveConfigPathEnv(t *testing.T) {
-	cfgDir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", cfgDir)
+	for _, useXDG := range []bool{true, false} {
+		name := "xdg_empty"
+		if useXDG {
+			name = "xdg_set"
+		}
+		t.Run(name, func(t *testing.T) {
+			cfgDir := isolateConfigDir(t, useXDG)
+			got, err := resolveConfigPath("")
+			if err != nil {
+				t.Fatalf("resolveConfigPath: %v", err)
+			}
+			if want := filepath.Join(cfgDir, "rote", "jobs.toml"); got != want {
+				t.Errorf("resolveConfigPath = %q, want %q", got, want)
+			}
+			if got, err := resolveConfigPath("/explicit.toml"); err != nil || got != "/explicit.toml" {
+				t.Errorf("override = %q, err = %v; want /explicit.toml", got, err)
+			}
+		})
+	}
+}
 
-	got, err := resolveConfigPath("")
-	if err != nil {
-		t.Fatalf("resolveConfigPath: %v", err)
+func TestResolveConfigPathWithoutHome(t *testing.T) {
+	for _, useXDG := range []bool{true, false} {
+		name := "xdg_empty"
+		if useXDG {
+			name = "xdg_set"
+		}
+		t.Run(name, func(t *testing.T) {
+			cfgDir := isolateConfigDir(t, useXDG)
+			t.Setenv("HOME", "")
+			got, err := resolveConfigPath("")
+			if runtime.GOOS == "linux" && useXDG {
+				// Linux can locate config using XDG_CONFIG_HOME alone; macOS
+				// ignores that variable and still needs HOME.
+				if want := filepath.Join(cfgDir, "rote", "jobs.toml"); err != nil || got != want {
+					t.Fatalf("resolveConfigPath = %q, err = %v; want %q", got, err, want)
+				}
+			} else if err == nil || got != "" || !strings.Contains(err.Error(), "locate config directory") {
+				t.Fatalf("resolveConfigPath = %q, err = %v; want config directory error", got, err)
+			}
+			// An explicit -c/--config must work even without a usable default.
+			if got, err := resolveConfigPath("/explicit.toml"); err != nil || got != "/explicit.toml" {
+				t.Errorf("override = %q, err = %v; want /explicit.toml", got, err)
+			}
+		})
 	}
-	if want := filepath.Join(cfgDir, "rote", "jobs.toml"); got != want {
-		t.Errorf("resolveConfigPath = %q, want %q", got, want)
+}
+
+func TestIsolateConfigDirRestoresEnvironment(t *testing.T) {
+	beforeHome, hadHome := os.LookupEnv("HOME")
+	beforeXDG, hadXDG := os.LookupEnv("XDG_CONFIG_HOME")
+	t.Run("isolated", func(t *testing.T) {
+		cfgDir := isolateConfigDir(t, true)
+		if _, err := os.Stat(filepath.Join(cfgDir, "rote", "jobs.toml")); !os.IsNotExist(err) {
+			t.Fatalf("isolated config should not exist: %v", err)
+		}
+	})
+	if got, set := os.LookupEnv("HOME"); got != beforeHome || set != hadHome {
+		t.Errorf("HOME was not restored after the test")
 	}
-	if got, _ := resolveConfigPath("/explicit.toml"); got != "/explicit.toml" {
-		t.Errorf("override = %q, want /explicit.toml", got)
+	if got, set := os.LookupEnv("XDG_CONFIG_HOME"); got != beforeXDG || set != hadXDG {
+		t.Errorf("XDG_CONFIG_HOME was not restored after the test")
 	}
 }
