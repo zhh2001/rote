@@ -27,10 +27,10 @@ With Go:
 go install github.com/zhh2001/rote/cmd/rote@latest
 ```
 
-Homebrew (available once the first release is tagged):
+Homebrew (macOS):
 
 ```sh
-brew install zhh2001/tap/rote
+brew install --cask zhh2001/tap/rote
 ```
 
 Linux packages — download the `.deb`/`.rpm`/`.apk` for your architecture from the [Releases](https://github.com/zhh2001/rote/releases) page, then:
@@ -42,6 +42,12 @@ apk add --allow-untrusted rote_*.apk   # Alpine
 ```
 
 Or grab a prebuilt binary archive from the same Releases page.
+
+### Compatibility and upgrades
+
+Starting with v1.0.0, the documented CLI commands/flags, configuration fields, exit-code meanings, and the ability to read existing run history are the stable user-facing interface. Compatible additions and fixes stay within 1.x; incompatible changes to that interface require a new major version. Terminal layout and human-readable table formatting are not machine-readable APIs, and the raw SQLite schema is an implementation detail, not a supported SQL API.
+
+When upgrading, stop schedulers and manual runs, allow graceful shutdown to finish, and back up your configuration and database before replacing the binary. v1.0.0 uses the same database schema as v0.2.1 and leaves history unlimited unless you explicitly configure `history_limit`. See the [v1.0.0 release notes](docs/releases/v1.0.0.md) for behavior changes and rollback cautions. Release maintainers can follow the [release checklist](docs/RELEASING.md).
 
 ## Quick start
 

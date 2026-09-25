@@ -1,0 +1,135 @@
+name: verify-release
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to verify (e.g. v1.0.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15-intel, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: Download and verify current and previous release archives
+        run: |
+          case "$(uname -m)" in
+            x86_64) arch=x86_64 ;;
+            arm64|aarch64) arch=arm64 ;;
+            *) exit 1 ;;
+          esac
+          asset="rote_$(uname -s)_$arch.tar.gz"
+          for version in "$RELEASE_TAG" v0.2.1; do
+            destination="$RUNNER_TEMP/rote-$version"
+            mkdir -p "$destination"
+            gh release download "$version" --repo "$GITHUB_REPOSITORY" \
+              --pattern "$asset" --pattern checksums.txt --dir "$destination"
+            (
+              cd "$destination"
+              awk -v name="$asset" '$2 == name { print; found=1 } END { if (!found) exit 1 }' \
+                checksums.txt > selected-checksum.txt
+              shasum -a 256 -c selected-checksum.txt
+              tar -xzf "$asset"
+            )
+          done
+          {
+            echo "ROTE_TEST_BINARY=$RUNNER_TEMP/rote-$RELEASE_TAG/rote"
+            echo "ROTE_TEST_PREVIOUS_BINARY=$RUNNER_TEMP/rote-v0.2.1/rote"
+            echo "ROTE_TEST_VERSION=${RELEASE_TAG#v}"
+          } >> "$GITHUB_ENV"
+
+      - name: Test downloaded binary and upgrade from v0.2.1
+        run: go test -v -count=1 -timeout=10m ./cmd/rote
+
+      - name: Test pinned and latest installers in isolated directories
+        run: |
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)" = "$RELEASE_TAG"
+          for channel in pinned latest; do
+            destination="$RUNNER_TEMP/rote-install-$channel"
+            mkdir -p "$destination"
+            version=""
+            if [ "$channel" = pinned ]; then version="$RELEASE_TAG"; fi
+            ROTE_VERSION="$version" INSTALL_DIR="$destination" sh ./install.sh
+            test "$("$destination/rote" version)" = "rote ${RELEASE_TAG#v}"
+            cmp "$ROTE_TEST_BINARY" "$destination/rote"
+          done
+
+      - name: Install and test Homebrew cask on macOS
+        if: runner.os == 'macOS'
+        run: |
+          brew install --cask zhh2001/tap/rote
+          test "$(rote version)" = "rote ${RELEASE_TAG#v}"
+          cmp "$ROTE_TEST_BINARY" "$(command -v rote)"
+
+      - name: Verify and install Linux packages in disposable containers
+        if: runner.os == 'Linux'
+        run: |
+          destination="$RUNNER_TEMP/rote-packages"
+          mkdir -p "$destination"
+          arch="$(go env GOARCH)"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "rote_*_linux_$arch.deb" --pattern "rote_*_linux_$arch.rpm" \
+            --pattern "rote_*_linux_$arch.apk" --pattern checksums.txt --dir "$destination"
+          (
+            cd "$destination"
+            for package in *.deb *.rpm *.apk; do
+              awk -v name="$package" '$2 == name { print; found=1 } END { if (!found) exit 1 }' \
+                checksums.txt > selected-checksum.txt
+              shasum -a 256 -c selected-checksum.txt
+            done
+          )
+          export EXPECTED_VERSION="${RELEASE_TAG#v}"
+          docker run --rm -e EXPECTED_VERSION -v "$destination:/packages:ro" \
+            -v "$ROTE_TEST_BINARY:/verified/rote:ro" debian:bookworm-slim sh -ec '
+              dpkg -i /packages/*.deb
+              test "$(rote version)" = "rote $EXPECTED_VERSION"
+              cmp /usr/bin/rote /verified/rote
+              rote init -c /tmp/jobs.toml
+              rote run -c /tmp/jobs.toml --db /tmp/rote.db example
+              rote logs --db /tmp/rote.db -o example | grep -F "last stdout ("
+            '
+          docker run --rm -e EXPECTED_VERSION -v "$destination:/packages:ro" \
+            -v "$ROTE_TEST_BINARY:/verified/rote:ro" fedora:latest sh -ec '
+              rpm -i /packages/*.rpm
+              test "$(rote version)" = "rote $EXPECTED_VERSION"
+              cmp /usr/bin/rote /verified/rote
+              rote init -c /tmp/jobs.toml
+              rote run -c /tmp/jobs.toml --db /tmp/rote.db example
+              rote logs --db /tmp/rote.db -o example | grep -F "last stdout ("
+            '
+          docker run --rm -e EXPECTED_VERSION -v "$destination:/packages:ro" \
+            -v "$ROTE_TEST_BINARY:/verified/rote:ro" alpine:latest sh -ec '
+              apk add --allow-untrusted --no-network /packages/*.apk
+              test "$(rote version)" = "rote $EXPECTED_VERSION"
+              cmp /usr/bin/rote /verified/rote
+              rote init -c /tmp/jobs.toml
+              rote run -c /tmp/jobs.toml --db /tmp/rote.db example
+              rote logs --db /tmp/rote.db -o example | grep -F "last stdout ("
+            '

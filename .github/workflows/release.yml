@@ -6,11 +6,38 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15-intel, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+      - name: Check formatting and vet
+        run: |
+          test -z "$(gofmt -s -l .)"
+          go vet ./...
+      - name: Test source with the race detector
+        run: go test -race -count=1 -timeout=10m ./...
+
   release:
+    needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -22,11 +49,22 @@ jobs:
         with:
           go-version: stable
 
+      - name: Require versioned release notes
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: test -f "docs/releases/$RELEASE_TAG.md"
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v7
         with:
           version: "~> v2"
-          args: release --clean
+          args: release --clean --release-notes=docs/releases/${{ github.ref_name }}.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+
+  verify:
+    needs: release
+    uses: ./.github/workflows/verify-release.yml
+    with:
+      tag: ${{ github.ref_name }}

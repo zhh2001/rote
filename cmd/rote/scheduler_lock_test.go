@@ -59,13 +59,23 @@ type cliProcess struct {
 
 func newCLIProcess(t *testing.T, args ...string) *cliProcess {
 	t.Helper()
-	exe, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
+	exe := os.Getenv("ROTE_TEST_BINARY")
+	if exe == "" {
+		var err error
+		exe, err = os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		args = append([]string{"-test.run=^TestSchedulerProcess$", "--"}, args...)
+	} else if !filepath.IsAbs(exe) {
+		t.Fatal("ROTE_TEST_BINARY must be an absolute path")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	t.Cleanup(cancel)
-	cmd := exec.CommandContext(ctx, exe, append([]string{"-test.run=^TestSchedulerProcess$", "--"}, args...)...)
+	// Release verification reuses every process test against the downloaded
+	// executable instead of the test binary's dispatcher. Unit tests still use
+	// the checked-out source; release executables are not race-instrumented.
+	cmd := exec.CommandContext(ctx, exe, args...)
 	cmd.Env = append(os.Environ(), "ROTE_TEST_SCHEDULER_PROCESS=1")
 	p := &cliProcess{cmd: cmd, done: make(chan struct{})}
 	cmd.Stdout, cmd.Stderr = &p.output, &p.output
