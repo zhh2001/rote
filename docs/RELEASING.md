@@ -60,6 +60,8 @@ Check which jobs ran before retrying. A failed source-test gate skips publishing
 
 Re-running an old workflow uses its original commit, not a newer main commit. Commit any test/code fixes, push main, and wait for all four native CI jobs first. Keep pushed tags immutable: if a different commit is needed for release, choose a new version and add matching release notes. Do not delete or force-move the old tag as an automatic recovery step.
 
+If publication succeeded and only the verification workflow needs fixing (for example, a missing test-container utility), keep the existing release and artifacts. Commit the workflow fix to main, then dispatch `verify-release.yml` from main against the existing tag as shown below. A verification-only fix does not require a new release. The checkout still uses the selected tag, so the tests exercise the shipped source and binaries with the corrected workflow.
+
 ## After publication
 
 Wait for **all** jobs, not only the GoReleaser publishing job. Post-publication verification downloads and checksum-verifies current and v0.2.1 archives; checks the version and initialization; reuses the CLI process suite against the downloaded executable; tests database upgrade/readback; runs both pinned-version and latest installers in temporary directories; installs the Homebrew cask on both Macs; and installs deb/rpm/apk packages in disposable Linux containers on both CPUs, comparing installed binaries and running a job with saved output. Linux additionally exercises real pseudo-terminal dashboard behavior.
@@ -67,7 +69,7 @@ Wait for **all** jobs, not only the GoReleaser publishing job. Post-publication 
 To rerun verification without publishing or changing the tag:
 
 ```sh
-gh workflow run verify-release.yml -f tag=v1.0.1
+gh workflow run verify-release.yml --ref main -f tag=v1.0.1
 gh run list --workflow verify-release.yml --limit 5
 gh run watch <verification-run-id> --exit-status
 ```

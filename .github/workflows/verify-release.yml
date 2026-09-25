@@ -117,6 +117,8 @@ jobs:
             '
           docker run --rm -e EXPECTED_VERSION -v "$destination:/packages:ro" \
             -v "$ROTE_TEST_BINARY:/verified/rote:ro" fedora:latest sh -ec '
+              # The base image omits cmp; this is a verification-only dependency.
+              dnf -y install diffutils
               rpm -i /packages/*.rpm
               test "$(rote version)" = "rote $EXPECTED_VERSION"
               cmp /usr/bin/rote /verified/rote
