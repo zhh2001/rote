@@ -342,21 +342,23 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 // cmdInit writes the starter config to path, creating parent directories. It
 // never overwrites an existing file.
 func cmdInit(stdout, stderr io.Writer, path string) int {
-	if _, err := os.Stat(path); err == nil {
-		fmt.Fprintf(stdout, "config already exists at %s; not overwriting\n", path)
-		return 0
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		fmt.Fprintf(stderr, "rote: %v\n", err)
-		return 1
-	}
-
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			fmt.Fprintf(stderr, "rote: create config directory: %v\n", err)
 			return 1
 		}
 	}
-	if err := os.WriteFile(path, []byte(starterConfig), 0o644); err != nil {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if errors.Is(err, fs.ErrExist) {
+		fmt.Fprintf(stdout, "config already exists at %s; not overwriting\n", path)
+		return 0
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "rote: write config: %v\n", err)
+		return 1
+	}
+	_, writeErr := io.WriteString(f, starterConfig)
+	if err := errors.Join(writeErr, f.Close()); err != nil {
 		fmt.Fprintf(stderr, "rote: write config: %v\n", err)
 		return 1
 	}
