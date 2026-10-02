@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/zhh2001/rote/internal/config"
@@ -58,6 +59,106 @@ func TestCmdInitNoOverwrite(t *testing.T) {
 	}
 	if string(data) != original {
 		t.Errorf("file was overwritten: %q", data)
+	}
+}
+
+func TestCmdInitKeepsSymlinks(t *testing.T) {
+	for _, exists := range []bool{false, true} {
+		for _, relative := range []bool{false, true} {
+			name := "dangling"
+			if exists {
+				name = "existing"
+			}
+			if relative {
+				name += "/relative"
+			} else {
+				name += "/absolute"
+			}
+			t.Run(name, func(t *testing.T) {
+				dir := t.TempDir()
+				path := filepath.Join(dir, "jobs.toml")
+				target := filepath.Join(dir, "target.toml")
+				original := "# existing jobs\n"
+				if exists {
+					if err := os.WriteFile(target, []byte(original), 0o644); err != nil {
+						t.Fatal(err)
+					}
+				}
+				link := target
+				if relative {
+					link = filepath.Base(target)
+				}
+				if err := os.Symlink(link, path); err != nil {
+					t.Fatal(err)
+				}
+
+				var out, errBuf bytes.Buffer
+				if code := dispatch([]string{"init", "-c", path}, &out, &errBuf); code != 0 {
+					t.Fatalf("init code = %d (stderr: %s)", code, errBuf.String())
+				}
+				if !strings.Contains(out.String(), "already exists") {
+					t.Errorf("init output = %q, want existing config message", out.String())
+				}
+				if got, err := os.Readlink(path); err != nil || got != link {
+					t.Errorf("config link = %q, %v; want %q", got, err, link)
+				}
+				if exists {
+					data, err := os.ReadFile(target)
+					if err != nil || string(data) != original {
+						t.Errorf("target contents = %q, %v; want %q", data, err, original)
+					}
+				} else if _, err := os.Lstat(target); !os.IsNotExist(err) {
+					t.Errorf("dangling link target was created: %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestCmdInitConcurrent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "jobs.toml")
+	const workers = 32
+	type result struct {
+		code   int
+		stdout string
+		stderr string
+	}
+	results := make(chan result, workers)
+	start := make(chan struct{})
+	var ready sync.WaitGroup
+	ready.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			ready.Done()
+			<-start
+			var out, errBuf bytes.Buffer
+			code := cmdInit(&out, &errBuf, path)
+			results <- result{code, out.String(), errBuf.String()}
+		}()
+	}
+	ready.Wait()
+	close(start)
+	created := 0
+	for i := 0; i < workers; i++ {
+		r := <-results
+		if r.code != 0 {
+			t.Errorf("init code = %d (stderr: %s)", r.code, r.stderr)
+		}
+		if strings.Contains(r.stdout, "wrote starter config") {
+			created++
+		} else if !strings.Contains(r.stdout, "already exists") {
+			t.Errorf("unexpected init output: %q", r.stdout)
+		}
+	}
+	if created != 1 {
+		t.Errorf("%d initializers wrote the config, want exactly one", created)
+	}
+	jobs, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("created config does not load: %v", err)
+	}
+	if len(jobs) != 1 || jobs[0].Name != "example" {
+		t.Errorf("starter jobs = %+v, want one job named example", jobs)
 	}
 }
 
